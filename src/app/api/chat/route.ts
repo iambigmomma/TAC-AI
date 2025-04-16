@@ -1,5 +1,7 @@
 import prompts from '@/lib/prompts';
-import MetaSearchAgent from '@/lib/search/metaSearchAgent';
+import MetaSearchAgent, {
+  type MetaSearchAgentType,
+} from '@/lib/search/metaSearchAgent';
 import crypto from 'crypto';
 import { AIMessage, BaseMessage, HumanMessage } from '@langchain/core/messages';
 import { EventEmitter } from 'stream';
@@ -20,7 +22,8 @@ import {
   getCustomOpenaiApiUrl,
   getCustomOpenaiModelName,
 } from '@/lib/config';
-import { searchHandlers } from '@/lib/search';
+import { SearchMode } from '@/components/ChatWindow';
+import { getRagflowChatCompletion } from '@/lib/ragflow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +48,7 @@ type Body = {
   message: Message;
   optimizationMode: 'speed' | 'balanced' | 'quality';
   focusMode: string;
+  searchMode?: SearchMode;
   history: Array<[string, string]>;
   files: Array<string>;
   chatModel: ChatModel;
@@ -181,10 +185,47 @@ const handleHistorySave = async (
   }
 };
 
+const getPromptsForFocus = (focusMode: string) => {
+  switch (focusMode) {
+    case 'academicSearch':
+      return {
+        queryGeneratorPrompt: prompts.academicSearchRetrieverPrompt,
+        responsePrompt: prompts.academicSearchResponsePrompt,
+      };
+    case 'redditSearch':
+      return {
+        queryGeneratorPrompt: prompts.redditSearchRetrieverPrompt,
+        responsePrompt: prompts.redditSearchResponsePrompt,
+      };
+    case 'youtubeSearch':
+      return {
+        queryGeneratorPrompt: prompts.youtubeSearchRetrieverPrompt,
+        responsePrompt: prompts.youtubeSearchResponsePrompt,
+      };
+    case 'wolframAlphaSearch':
+      return {
+        queryGeneratorPrompt: prompts.wolframAlphaSearchRetrieverPrompt,
+        responsePrompt: prompts.wolframAlphaSearchResponsePrompt,
+      };
+    case 'writingAssistant':
+      return {
+        queryGeneratorPrompt: prompts.writingAssistantPrompt,
+        responsePrompt: prompts.writingAssistantPrompt,
+      };
+    case 'webSearch':
+    default:
+      return {
+        queryGeneratorPrompt: prompts.webSearchRetrieverPrompt,
+        responsePrompt: prompts.webSearchResponsePrompt,
+      };
+  }
+};
+
 export const POST = async (req: Request) => {
   try {
     const body = (await req.json()) as Body;
-    const { message } = body;
+    const { message, searchMode = 'web', focusMode } = body;
+    const { chatId } = message;
 
     if (message.content === '') {
       return Response.json(
@@ -195,14 +236,15 @@ export const POST = async (req: Request) => {
       );
     }
 
-    const [chatModelProviders, embeddingModelProviders] = await Promise.all([
-      getAvailableChatModelProviders(),
-      getAvailableEmbeddingModelProviders(),
-    ]);
+    const [chatModelProvidersList, embeddingModelProvidersList] =
+      await Promise.all([
+        getAvailableChatModelProviders(),
+        getAvailableEmbeddingModelProviders(),
+      ]);
 
     const chatModelProvider =
-      chatModelProviders[
-        body.chatModel?.provider || Object.keys(chatModelProviders)[0]
+      chatModelProvidersList[
+        body.chatModel?.provider || Object.keys(chatModelProvidersList)[0]
       ];
     const chatModel =
       chatModelProvider[
@@ -210,8 +252,9 @@ export const POST = async (req: Request) => {
       ];
 
     const embeddingProvider =
-      embeddingModelProviders[
-        body.embeddingModel?.provider || Object.keys(embeddingModelProviders)[0]
+      embeddingModelProvidersList[
+        body.embeddingModel?.provider ||
+          Object.keys(embeddingModelProvidersList)[0]
       ];
     const embeddingModel =
       embeddingProvider[
@@ -249,58 +292,78 @@ export const POST = async (req: Request) => {
       message.messageId ?? crypto.randomBytes(7).toString('hex');
     const aiMessageId = crypto.randomBytes(7).toString('hex');
 
-    const history: BaseMessage[] = body.history.map((msg) => {
-      if (msg[0] === 'human') {
-        return new HumanMessage({
-          content: msg[1],
-        });
-      } else {
-        return new AIMessage({
-          content: msg[1],
-        });
-      }
-    });
-
-    const handler = searchHandlers[body.focusMode];
-
-    if (!handler) {
-      return Response.json(
-        {
-          message: 'Invalid focus mode',
-        },
-        { status: 400 },
-      );
-    }
-
-    const stream = await handler.searchAndAnswer(
-      message.content,
-      history,
-      llm,
-      embedding,
-      body.optimizationMode,
-      body.files,
-      body.systemInstructions,
-    );
+    await handleHistorySave(message, humanMessageId, focusMode, body.files);
 
     const responseStream = new TransformStream();
     const writer = responseStream.writable.getWriter();
     const encoder = new TextEncoder();
+    const searchEmitter = new EventEmitter();
 
-    handleEmitterEvents(stream, writer, encoder, aiMessageId, message.chatId);
-    handleHistorySave(message, humanMessageId, body.focusMode, body.files);
+    if (searchMode === 'docs') {
+      console.log(`Executing RAGflow Chat search for appChatId: ${chatId}...`);
+      const ragflowStream = getRagflowChatCompletion(chatId, message.content);
 
-    return new Response(responseStream.readable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        Connection: 'keep-alive',
-        'Cache-Control': 'no-cache, no-transform',
-      },
-    });
-  } catch (err) {
-    console.error('An error occurred while processing chat request:', err);
-    return Response.json(
-      { message: 'An error occurred while processing chat request' },
-      { status: 500 },
-    );
+      return new Response(ragflowStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          Connection: 'keep-alive',
+          'Cache-Control': 'no-cache, no-transform',
+        },
+      });
+    } else {
+      handleEmitterEvents(searchEmitter, writer, encoder, aiMessageId, chatId);
+
+      console.log(
+        `Executing Web/Both search (mode: ${searchMode}, focus: ${focusMode})...`,
+      );
+      const selectedPrompts = getPromptsForFocus(focusMode);
+
+      const agentConfig = {
+        searchWeb: true,
+        rerank: true,
+        summarizer: true,
+        rerankThreshold: 0.7,
+        queryGeneratorPrompt: selectedPrompts.queryGeneratorPrompt,
+        responsePrompt: selectedPrompts.responsePrompt,
+        activeEngines: ['google'],
+      };
+
+      const agent = new MetaSearchAgent(agentConfig);
+
+      const historyMessages: BaseMessage[] = body.history.map((msg) => {
+        if (msg[0] === 'human') {
+          return new HumanMessage(msg[1]);
+        } else {
+          return new AIMessage(msg[1]);
+        }
+      });
+
+      const systemInstructions =
+        body.systemInstructions || selectedPrompts.responsePrompt;
+
+      const agentEmitter = await agent.searchAndAnswer(
+        message.content,
+        historyMessages,
+        llm!,
+        embedding!,
+        body.optimizationMode,
+        body.files,
+        systemInstructions,
+      );
+
+      agentEmitter.on('end', () => searchEmitter.emit('end'));
+      agentEmitter.on('error', (error) => searchEmitter.emit('error', error));
+
+      return new Response(responseStream.readable, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          Connection: 'keep-alive',
+          'Cache-Control': 'no-cache, no-transform',
+        },
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    return Response.json({ error: (e as Error).message }, { status: 500 });
   }
 };

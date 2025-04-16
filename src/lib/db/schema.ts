@@ -18,11 +18,12 @@ interface File {
 }
 
 export const chats = sqliteTable('chats', {
-  id: text('id').primaryKey(),
+  id: text('id').primaryKey().notNull(),
   title: text('title').notNull(),
-  createdAt: text('createdAt').notNull(),
-  focusMode: text('focusMode').notNull(),
+  createdAt: text('created_at').notNull(),
+  focusMode: text('focus_mode').notNull(),
   files: text('files', { mode: 'json' })
     .$type<File[]>()
     .default(sql`'[]'`),
+  ragflowSessionId: text('ragflow_session_id').unique(),
 });

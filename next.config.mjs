@@ -6,6 +6,9 @@ const nextConfig = {
       {
         hostname: 's2.googleusercontent.com',
       },
+      {
+        hostname: 'tac-ai-translation.fra1.cdn.digitaloceanspaces.com',
+      },
     ],
   },
   serverExternalPackages: ['pdf-parse'],

@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import Attach from './MessageInputActions/Attach';
 import CopilotToggle from './MessageInputActions/Copilot';
-import { File } from './ChatWindow';
+import { File, SearchMode } from './ChatWindow';
 import AttachSmall from './MessageInputActions/AttachSmall';
+import SearchModeToggle from './MessageInputActions/SearchModeToggle';
 
 const MessageInput = ({
   sendMessage,
@@ -14,6 +15,8 @@ const MessageInput = ({
   setFileIds,
   files,
   setFiles,
+  searchMode,
+  setSearchMode,
 }: {
   sendMessage: (message: string) => void;
   loading: boolean;
@@ -21,6 +24,8 @@ const MessageInput = ({
   setFileIds: (fileIds: string[]) => void;
   files: File[];
   setFiles: (files: File[]) => void;
+  searchMode: SearchMode;
+  setSearchMode: (mode: SearchMode) => void;
 }) => {
   const [copilotEnabled, setCopilotEnabled] = useState(false);
   const [message, setMessage] = useState('');
@@ -80,12 +85,20 @@ const MessageInput = ({
       )}
     >
       {mode === 'single' && (
-        <AttachSmall
-          fileIds={fileIds}
-          setFileIds={setFileIds}
-          files={files}
-          setFiles={setFiles}
-        />
+        <>
+          <div className="mr-2">
+            <SearchModeToggle
+              searchMode={searchMode}
+              setSearchMode={setSearchMode}
+            />
+          </div>
+          <AttachSmall
+            fileIds={fileIds}
+            setFileIds={setFileIds}
+            files={files}
+            setFiles={setFiles}
+          />
+        </>
       )}
       <TextareaAutosize
         ref={inputRef}
@@ -98,7 +111,7 @@ const MessageInput = ({
         placeholder="Ask a follow-up"
       />
       {mode === 'single' && (
-        <div className="flex flex-row items-center space-x-4">
+        <div className="flex flex-row items-center space-x-4 ml-2">
           <CopilotToggle
             copilotEnabled={copilotEnabled}
             setCopilotEnabled={setCopilotEnabled}
@@ -113,12 +126,18 @@ const MessageInput = ({
       )}
       {mode === 'multi' && (
         <div className="flex flex-row items-center justify-between w-full pt-2">
-          <AttachSmall
-            fileIds={fileIds}
-            setFileIds={setFileIds}
-            files={files}
-            setFiles={setFiles}
-          />
+          <div className="flex flex-row items-center space-x-2">
+            <SearchModeToggle
+              searchMode={searchMode}
+              setSearchMode={setSearchMode}
+            />
+            <AttachSmall
+              fileIds={fileIds}
+              setFileIds={setFileIds}
+              files={files}
+              setFiles={setFiles}
+            />
+          </div>
           <div className="flex flex-row items-center space-x-4">
             <CopilotToggle
               copilotEnabled={copilotEnabled}

@@ -9,9 +9,11 @@ import crypto from 'crypto';
 import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import { getSuggestions } from '@/lib/actions';
-import { Settings } from 'lucide-react';
+import { Settings, Loader2, Send, Share2, Sparkles, Menu } from 'lucide-react';
 import Link from 'next/link';
 import NextError from 'next/error';
+import { type RagflowReference } from '@/lib/types';
+// import { MessageSuggestions } from './MessageSuggestions'; // Temporarily commented out
 
 export type Message = {
   messageId: string;
@@ -21,7 +23,10 @@ export type Message = {
   role: 'user' | 'assistant';
   suggestions?: string[];
   sources?: Document[];
+  references?: RagflowReference;
 };
+
+export type SearchMode = 'web' | 'docs' | 'both';
 
 export interface File {
   fileName: string;
@@ -282,6 +287,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
 
   const [focusMode, setFocusMode] = useState('webSearch');
   const [optimizationMode, setOptimizationMode] = useState('speed');
+  const [searchMode, setSearchMode] = useState<SearchMode>('web');
 
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
 
@@ -337,24 +343,28 @@ const ChatWindow = ({ id }: { id?: string }) => {
     setLoading(true);
     setMessageAppeared(false);
 
-    let sources: Document[] | undefined = undefined;
-    let recievedMessage = '';
-    let added = false;
-
     messageId = messageId ?? crypto.randomBytes(7).toString('hex');
+    const aiMessageId = crypto.randomBytes(7).toString('hex');
 
     setMessages((prevMessages) => [
       ...prevMessages,
       {
         content: message,
-        messageId: messageId,
+        messageId: messageId!,
         chatId: chatId!,
         role: 'user',
         createdAt: new Date(),
       },
     ]);
 
+    let currentContent = '';
+    let currentReferences: RagflowReference | undefined = undefined;
+    let sources: Document[] | undefined = undefined;
+    let assistantMessageAdded = false;
+
     const messageHandler = async (data: any) => {
+      const targetMessageId = aiMessageId;
+
       if (data.type === 'error') {
         toast.error(data.data);
         setLoading(false);
@@ -363,61 +373,93 @@ const ChatWindow = ({ id }: { id?: string }) => {
 
       if (data.type === 'sources') {
         sources = data.data;
-        if (!added) {
+        if (!assistantMessageAdded) {
           setMessages((prevMessages) => [
             ...prevMessages,
             {
               content: '',
-              messageId: data.messageId,
+              messageId: targetMessageId,
               chatId: chatId!,
               role: 'assistant',
               sources: sources,
               createdAt: new Date(),
             },
           ]);
-          added = true;
+          assistantMessageAdded = true;
         }
         setMessageAppeared(true);
       }
 
+      if (data.type === 'references') {
+        console.log(
+          '[messageHandler] Received references event with data:',
+          JSON.stringify(data.data, null, 2),
+        );
+        currentReferences = data.data as RagflowReference;
+        return;
+      }
+
       if (data.type === 'message') {
-        if (!added) {
+        currentContent = data.data;
+
+        if (!assistantMessageAdded) {
           setMessages((prevMessages) => [
             ...prevMessages,
             {
-              content: data.data,
-              messageId: data.messageId,
+              content: currentContent,
+              messageId: targetMessageId,
               chatId: chatId!,
               role: 'assistant',
               sources: sources,
+              references: undefined,
               createdAt: new Date(),
             },
           ]);
-          added = true;
+          assistantMessageAdded = true;
+        } else {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.messageId === targetMessageId
+                ? { ...msg, content: currentContent }
+                : msg,
+            ),
+          );
         }
-
-        setMessages((prev) =>
-          prev.map((message) => {
-            if (message.messageId === data.messageId) {
-              return { ...message, content: message.content + data.data };
-            }
-
-            return message;
-          }),
-        );
-
-        recievedMessage += data.data;
         setMessageAppeared(true);
       }
 
       if (data.type === 'messageEnd') {
+        console.log(
+          '[messageEnd] Finalizing state. currentReferences:',
+          JSON.stringify(currentReferences, null, 2),
+        );
+
         setChatHistory((prevHistory) => [
           ...prevHistory,
           ['human', message],
-          ['assistant', recievedMessage],
+          ['assistant', currentContent],
         ]);
-
         setLoading(false);
+
+        setMessages((prev) => {
+          const updatedMessages = prev.map((msg) =>
+            msg.messageId === targetMessageId
+              ? {
+                  ...msg,
+                  content: currentContent,
+                  references: currentReferences,
+                }
+              : msg,
+          );
+          const finalMsg = updatedMessages.find(
+            (m) => m.messageId === targetMessageId,
+          );
+          console.log(
+            '[messageEnd] Message object prepared for state update:',
+            JSON.stringify(finalMsg, null, 2),
+          );
+          return updatedMessages;
+        });
 
         const lastMsg = messagesRef.current[messagesRef.current.length - 1];
 
@@ -452,6 +494,21 @@ const ChatWindow = ({ id }: { id?: string }) => {
             }),
           );
         }
+
+        // console.log('[messageEnd] Generating suggestions...');
+        // try {
+        //   const suggestions = await getSuggestions(message);
+        //   // console.log('[messageEnd] Received suggestions:', suggestions);
+        //   setMessages((prev) =>
+        //     prev.map((msg) =>
+        //       msg.messageId === targetMessageId
+        //         ? { ...msg, suggestions: suggestions ?? [] }
+        //         : msg,
+        //     ),
+        //   );
+        // } catch (suggestionError) {
+        //   console.error('[messageEnd] Error getting suggestions:', suggestionError);
+        // }
       }
     };
 
@@ -470,6 +527,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
         chatId: chatId!,
         files: fileIds,
         focusMode: focusMode,
+        searchMode: searchMode,
         optimizationMode: optimizationMode,
         history: chatHistory,
         chatModel: {
@@ -493,21 +551,88 @@ const ChatWindow = ({ id }: { id?: string }) => {
 
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
-
-      partialChunk += decoder.decode(value, { stream: true });
-
-      try {
-        const messages = partialChunk.split('\n');
-        for (const msg of messages) {
-          if (!msg.trim()) continue;
-          const json = JSON.parse(msg);
-          messageHandler(json);
-        }
-        partialChunk = '';
-      } catch (error) {
-        console.warn('Incomplete JSON, waiting for next chunk...');
+      if (done) {
+        console.log('[Stream Reader] Stream finished (done=true).');
+        break;
       }
+
+      // Log the raw decoded chunk received
+      const decodedChunk = decoder.decode(value, { stream: true });
+      console.log(
+        '[Stream Reader] Received raw decoded chunk:',
+        JSON.stringify(decodedChunk),
+      );
+
+      // Append new data to the partial chunk
+      partialChunk += decodedChunk;
+      console.log(
+        '[Stream Parser] Current partialChunk before processing:',
+        JSON.stringify(partialChunk),
+      );
+
+      // Try to process all complete JSON objects separated by newline
+      let newlineIndex;
+      while ((newlineIndex = partialChunk.indexOf('\n')) >= 0) {
+        const jsonString = partialChunk.substring(0, newlineIndex).trim();
+        const remaining = partialChunk.substring(newlineIndex + 1);
+
+        console.log(
+          `[Stream Parser] Found newline. JSON string: ${JSON.stringify(jsonString)}, Remaining partialChunk: ${JSON.stringify(remaining)}`,
+        );
+
+        partialChunk = remaining; // Update partialChunk *after* logging
+
+        if (jsonString) {
+          try {
+            const json = JSON.parse(jsonString);
+            console.log(
+              '[Stream Parser] Successfully parsed JSON:',
+              JSON.stringify(json, null, 2),
+            );
+            messageHandler(json);
+          } catch (error) {
+            console.error(
+              '[Stream Parser] Failed to parse JSON chunk:',
+              jsonString,
+              error,
+            );
+          }
+        }
+      }
+      console.log(
+        '[Stream Parser] Current partialChunk after processing newlines:',
+        JSON.stringify(partialChunk),
+      );
+    } // End of while loop
+
+    console.log(
+      '[Stream Parser] Loop finished. Final partialChunk:',
+      JSON.stringify(partialChunk),
+    );
+
+    // After the loop, try to parse any remaining data in partialChunk
+    const remainingJsonString = partialChunk.trim();
+    if (remainingJsonString) {
+      console.log(
+        '[Stream Parser] Attempting to parse final remaining chunk:',
+        JSON.stringify(remainingJsonString),
+      );
+      try {
+        const json = JSON.parse(remainingJsonString);
+        console.log(
+          '[Stream Parser] Successfully parsed final JSON chunk:',
+          JSON.stringify(json, null, 2),
+        );
+        messageHandler(json);
+      } catch (error) {
+        console.error(
+          '[Stream Parser] Failed to parse final JSON chunk:',
+          remainingJsonString,
+          error,
+        );
+      }
+    } else {
+      console.log('[Stream Parser] No final remaining chunk to parse.');
     }
   };
 
@@ -570,6 +695,8 @@ const ChatWindow = ({ id }: { id?: string }) => {
               setFileIds={setFileIds}
               files={files}
               setFiles={setFiles}
+              searchMode={searchMode}
+              setSearchMode={setSearchMode}
             />
           </>
         ) : (
@@ -583,6 +710,8 @@ const ChatWindow = ({ id }: { id?: string }) => {
             setFileIds={setFileIds}
             files={files}
             setFiles={setFiles}
+            searchMode={searchMode}
+            setSearchMode={setSearchMode}
           />
         )}
       </div>

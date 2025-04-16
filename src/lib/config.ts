@@ -36,6 +36,9 @@ interface Config {
   };
   API_ENDPOINTS: {
     SEARXNG: string;
+    RAGFLOW_API_URL: string;
+    RAGFLOW_API_KEY: string;
+    RAGFLOW_CHAT_ID: string;
   };
 }
 
@@ -63,6 +66,15 @@ export const getGeminiApiKey = () => loadConfig().MODELS.GEMINI.API_KEY;
 
 export const getSearxngApiEndpoint = () =>
   process.env.SEARXNG_API_URL || loadConfig().API_ENDPOINTS.SEARXNG;
+
+export const getRagflowApiUrl = () =>
+  process.env.RAGFLOW_API_URL || loadConfig().API_ENDPOINTS.RAGFLOW_API_URL;
+
+export const getRagflowApiKey = () =>
+  process.env.RAGFLOW_API_KEY || loadConfig().API_ENDPOINTS.RAGFLOW_API_KEY;
+
+export const getRagflowChatId = () =>
+  process.env.RAGFLOW_CHAT_ID || loadConfig().API_ENDPOINTS.RAGFLOW_CHAT_ID;
 
 export const getOllamaApiEndpoint = () => loadConfig().MODELS.OLLAMA.API_URL;
 

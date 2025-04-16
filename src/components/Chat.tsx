@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import MessageInput from './MessageInput';
-import { File, Message } from './ChatWindow';
+import { File, Message, SearchMode } from './ChatWindow';
 import MessageBox from './MessageBox';
 import MessageBoxLoading from './MessageBoxLoading';
 
@@ -16,6 +16,8 @@ const Chat = ({
   setFileIds,
   files,
   setFiles,
+  searchMode,
+  setSearchMode,
 }: {
   messages: Message[];
   sendMessage: (message: string) => void;
@@ -26,6 +28,8 @@ const Chat = ({
   setFileIds: (fileIds: string[]) => void;
   files: File[];
   setFiles: (files: File[]) => void;
+  searchMode: SearchMode;
+  setSearchMode: (mode: SearchMode) => void;
 }) => {
   const [dividerWidth, setDividerWidth] = useState(0);
   const dividerRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +103,8 @@ const Chat = ({
             setFileIds={setFileIds}
             files={files}
             setFiles={setFiles}
+            searchMode={searchMode}
+            setSearchMode={setSearchMode}
           />
         </div>
       )}

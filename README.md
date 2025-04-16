@@ -27,6 +27,7 @@
 - [Features](#features)
 - [Installation](#installation)
   - [Getting Started with Docker (Recommended)](#getting-started-with-docker-recommended)
+  - [Local Development Setup](#local-development-setup)
   - [Non-Docker Installation](#non-docker-installation)
   - [Ollama Connection Errors](#ollama-connection-errors)
 - [Using as a Search Engine](#using-as-a-search-engine)
@@ -104,6 +105,46 @@ There are mainly 2 ways of installing Perplexica - With Docker, Without Docker. 
 6. Wait a few minutes for the setup to complete. You can access Perplexica at http://localhost:3000 in your web browser.
 
 **Note**: After the containers are built, you can start Perplexica directly from Docker without having to open a terminal.
+
+### Local Development Setup
+
+If you want to run the frontend locally for development (e.g., using `npm run dev`) while still using the SearXNG instance managed by Docker, follow these steps:
+
+1.  **Start SearXNG Service:** Ensure Docker is running and start _only_ the SearXNG service using Docker Compose:
+
+    ```bash
+    docker compose up -d searxng
+    ```
+
+    This command starts the SearXNG container and maps its internal port 8080 to port 4000 on your local machine (`localhost:4000`).
+
+2.  **Configure Environment:** Create a file named `.env` in the root directory of the project (the same directory as `package.json`). Add the following line to this file:
+
+    ```env
+    SEARXNG_API_URL=http://localhost:4000
+    ```
+
+    This tells your local development server to connect to the SearXNG instance running at `http://localhost:4000`. This environment variable overrides the setting in `config.toml` when running locally.
+
+3.  **Install Dependencies:** Open your terminal in the project's root directory and install the necessary Node.js packages:
+
+    ```bash
+    npm install
+    ```
+
+4.  **Set Up Database:** The application uses a SQLite database. Run the following command to create the necessary tables (like the `chats` table for history):
+
+    ```bash
+    npm run db:push
+    ```
+
+5.  **Run Development Server:** Start the Next.js development server:
+
+    ```bash
+    npm run dev
+    ```
+
+6.  **Access Perplexica:** Open your web browser and navigate to `http://localhost:3000`. Your local frontend should now be running and connected to the SearXNG Docker container.
 
 ### Non-Docker Installation
 

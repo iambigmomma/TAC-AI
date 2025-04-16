@@ -5,7 +5,8 @@ import CopilotToggle from './MessageInputActions/Copilot';
 import Focus from './MessageInputActions/Focus';
 import Optimization from './MessageInputActions/Optimization';
 import Attach from './MessageInputActions/Attach';
-import { File } from './ChatWindow';
+import { File, SearchMode } from './ChatWindow';
+import SearchModeToggle from './MessageInputActions/SearchModeToggle';
 
 const EmptyChatMessageInput = ({
   sendMessage,
@@ -17,6 +18,8 @@ const EmptyChatMessageInput = ({
   setFileIds,
   files,
   setFiles,
+  searchMode,
+  setSearchMode,
 }: {
   sendMessage: (message: string) => void;
   focusMode: string;
@@ -27,6 +30,8 @@ const EmptyChatMessageInput = ({
   setFileIds: (fileIds: string[]) => void;
   files: File[];
   setFiles: (files: File[]) => void;
+  searchMode: SearchMode;
+  setSearchMode: (mode: SearchMode) => void;
 }) => {
   const [copilotEnabled, setCopilotEnabled] = useState(false);
   const [message, setMessage] = useState('');
@@ -84,6 +89,10 @@ const EmptyChatMessageInput = ({
         />
         <div className="flex flex-row items-center justify-between mt-4">
           <div className="flex flex-row items-center space-x-2 lg:space-x-4">
+            <SearchModeToggle
+              searchMode={searchMode}
+              setSearchMode={setSearchMode}
+            />
             <Focus focusMode={focusMode} setFocusMode={setFocusMode} />
             <Attach
               fileIds={fileIds}

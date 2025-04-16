@@ -1,97 +1,189 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { BookOpenText, Home, Search, SquarePen, Settings } from 'lucide-react';
+import {
+  BookOpenText,
+  ChevronDown,
+  ChevronUp,
+  History,
+  Home,
+  Search,
+  Settings,
+  Star,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useSelectedLayoutSegments } from 'next/navigation';
+import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import React, { useState, type ReactNode } from 'react';
-import Layout from './Layout';
-
-const VerticalIconContainer = ({ children }: { children: ReactNode }) => {
-  return (
-    <div className="flex flex-col items-center gap-y-3 w-full">{children}</div>
-  );
-};
 
 const Sidebar = ({ children }: { children: React.ReactNode }) => {
-  const segments = useSelectedLayoutSegments();
+  const pathname = usePathname();
+  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
 
-  const navLinks = [
-    {
-      icon: Home,
-      href: '/',
-      active: segments.length === 0 || segments.includes('c'),
-      label: 'Home',
-    },
-    {
-      icon: Search,
-      href: '/discover',
-      active: segments.includes('discover'),
-      label: 'Discover',
-    },
-    {
-      icon: BookOpenText,
-      href: '/library',
-      active: segments.includes('library'),
-      label: 'Library',
-    },
-  ];
+  const getLinkClasses = (href: string, isExact = true) => {
+    const isActive = isExact ? pathname === href : pathname.startsWith(href);
+    return cn(
+      'group flex items-center rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100',
+      isActive
+        ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
+        : 'text-gray-600 dark:text-gray-400',
+    );
+  };
 
   return (
     <div>
-      <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-20 lg:flex-col">
-        <div className="flex grow flex-col items-center justify-between gap-y-5 overflow-y-auto bg-light-secondary dark:bg-dark-secondary px-2 py-8">
-          <a href="/">
-            <SquarePen className="cursor-pointer" />
-          </a>
-          <VerticalIconContainer>
-            {navLinks.map((link, i) => (
-              <Link
-                key={i}
-                href={link.href}
-                className={cn(
-                  'relative flex flex-row items-center justify-center cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 duration-150 transition w-full py-2 rounded-lg',
-                  link.active
-                    ? 'text-black dark:text-white'
-                    : 'text-black/70 dark:text-white/70',
-                )}
-              >
-                <link.icon />
-                {link.active && (
-                  <div className="absolute right-0 -mr-2 h-full w-1 rounded-l-lg bg-black dark:bg-white" />
-                )}
-              </Link>
-            ))}
-          </VerticalIconContainer>
+      <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-64 lg:flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-secondary">
+        <div className="flex grow flex-col gap-y-5 overflow-y-auto px-4 py-4">
+          <div className="flex h-16 shrink-0 items-center px-2">
+            <Image
+              src="https://tac-ai-translation.fra1.cdn.digitaloceanspaces.com/udp%20logo.png"
+              alt="Company Logo"
+              width={128}
+              height={32}
+              priority
+            />
+          </div>
 
-          <Link href="/settings">
-            <Settings className="cursor-pointer" />
-          </Link>
+          <nav className="flex flex-1 flex-col">
+            <ul role="list" className="flex flex-1 flex-col gap-y-1">
+              <li>
+                <Link href="/" className={getLinkClasses('/')}>
+                  <Search className="mr-3 h-5 w-5 flex-shrink-0" />
+                  Search
+                  <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    ⌘K
+                  </span>
+                </Link>
+              </li>
+              {/* <li>
+                <Link href="/library" className={getLinkClasses('/library', false)}>
+                  <BookOpenText className="mr-3 h-5 w-5 flex-shrink-0" />
+                  知识库
+                </Link>
+              </li> */}
+              <li>
+                <Link
+                  href="/favorites"
+                  className={getLinkClasses('/favorites')}
+                >
+                  <Star className="mr-3 h-5 w-5 flex-shrink-0" />
+                  Favorites
+                </Link>
+              </li>
+              <li>
+                <div className="space-y-1">
+                  <Link href="/library" passHref legacyBehavior>
+                    <button
+                      onClick={(e) => {
+                        setIsHistoryOpen(!isHistoryOpen);
+                      }}
+                      className={cn(
+                        getLinkClasses('/history', false),
+                        'w-full justify-between flex items-center',
+                      )}
+                    >
+                      <div className="flex items-center">
+                        <History className="mr-3 h-5 w-5 flex-shrink-0" />
+                        History
+                      </div>
+                      {isHistoryOpen ? (
+                        <ChevronUp className="h-5 w-5 flex-shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 flex-shrink-0" />
+                      )}
+                    </button>
+                  </Link>
+                  {/* {isHistoryOpen && (
+                    <ul className="ml-4 mt-1 space-y-1 pl-4 border-l border-gray-200 dark:border-gray-700">
+                      <li>
+                        <Link
+                          href="#"
+                          className={
+                            getLinkClasses('#today', false) + ' text-xs'
+                          }
+                        >
+                          如何看待读书无用论？
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          href="#"
+                          className={
+                            getLinkClasses('#7days-1', false) + ' text-xs'
+                          }
+                        >
+                          1949年南迁對於故宫的...
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          href="#"
+                          className={
+                            getLinkClasses('#7days-2', false) + ' text-xs'
+                          }
+                        >
+                          孙中山的情人
+                        </Link>
+                      </li>
+                      <li className="pt-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                        近7天
+                      </li>
+                      <li>
+                        <Link
+                          href="#"
+                          className={
+                            getLinkClasses('#7days-3', false) + ' text-xs'
+                          }
+                        >
+                          请概述「全球人口老龄...
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          href="#"
+                          className={
+                            getLinkClasses('#7days-4', false) + ' text-xs'
+                          }
+                        >
+                          好看的武侠小说有哪些？
+                        </Link>
+                      </li>
+                    </ul>
+                  )} */}
+                </div>
+              </li>
+
+              <li className="mt-auto pb-4">
+                <Link href="/settings" className={getLinkClasses('/settings')}>
+                  <Settings className="mr-3 h-5 w-5" />
+                  Settings
+                </Link>
+              </li>
+
+              <li className="-mx-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100">
+                  <span className="inline-block h-8 w-8 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                    <svg
+                      className="h-full w-full text-gray-300 dark:text-gray-500"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                  </span>
+                  <span>Jeff Fan</span>
+                </div>
+              </li>
+            </ul>
+          </nav>
         </div>
       </div>
 
-      <div className="fixed bottom-0 w-full z-50 flex flex-row items-center gap-x-6 bg-light-primary dark:bg-dark-primary px-4 py-4 shadow-sm lg:hidden">
-        {navLinks.map((link, i) => (
-          <Link
-            href={link.href}
-            key={i}
-            className={cn(
-              'relative flex flex-col items-center space-y-1 text-center w-full',
-              link.active
-                ? 'text-black dark:text-white'
-                : 'text-black dark:text-white/70',
-            )}
-          >
-            {link.active && (
-              <div className="absolute top-0 -mt-4 h-1 w-full rounded-b-lg bg-black dark:bg-white" />
-            )}
-            <link.icon />
-            <p className="text-xs">{link.label}</p>
-          </Link>
-        ))}
+      <div className="lg:pl-64">
+        <main className="py-10">
+          <div className="px-4 sm:px-6 lg:px-8">{children}</div>
+        </main>
       </div>
-
-      <Layout>{children}</Layout>
     </div>
   );
 };

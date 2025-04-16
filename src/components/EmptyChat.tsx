@@ -1,7 +1,7 @@
 import { Settings } from 'lucide-react';
 import EmptyChatMessageInput from './EmptyChatMessageInput';
 import { useState } from 'react';
-import { File } from './ChatWindow';
+import { File, SearchMode } from './ChatWindow';
 import Link from 'next/link';
 
 const EmptyChat = ({
@@ -14,6 +14,8 @@ const EmptyChat = ({
   setFileIds,
   files,
   setFiles,
+  searchMode,
+  setSearchMode,
 }: {
   sendMessage: (message: string) => void;
   focusMode: string;
@@ -24,6 +26,8 @@ const EmptyChat = ({
   setFileIds: (fileIds: string[]) => void;
   files: File[];
   setFiles: (files: File[]) => void;
+  searchMode: SearchMode;
+  setSearchMode: (mode: SearchMode) => void;
 }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -48,6 +52,8 @@ const EmptyChat = ({
           setFileIds={setFileIds}
           files={files}
           setFiles={setFiles}
+          searchMode={searchMode}
+          setSearchMode={setSearchMode}
         />
       </div>
     </div>
