@@ -17,6 +17,7 @@ import {
   StopCircle,
   Layers3,
   Plus,
+  Loader2,
 } from 'lucide-react';
 import Markdown, { MarkdownToJSX } from 'markdown-to-jsx';
 import Copy from './MessageActions/Copy';
@@ -37,6 +38,7 @@ import {
   type RagflowReferenceChunk,
   type RagflowDocAgg,
 } from '@/lib/types';
+import { useTypewriter } from '@/hooks/useTypewriter';
 
 const ThinkTagProcessor = ({ children }: { children: React.ReactNode }) => {
   return <ThinkBox content={children as string} />;
@@ -63,6 +65,42 @@ const MessageBox = ({
 }) => {
   const [parsedMessage, setParsedMessage] = useState(message.content);
   const [speechMessage, setSpeechMessage] = useState(message.content);
+
+  // --- State for Loading Animation Text ---
+  const loadingMessages = [
+    'Analyzing request...',
+    'Searching relevant documents...',
+    'Compiling information...',
+    'Generating answer...',
+    'Please wait a moment...',
+  ];
+  const [currentLoadingMessageIndex, setCurrentLoadingMessageIndex] =
+    useState(0);
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    if (loading && isLast && message.role === 'assistant') {
+      // Start cycling through messages when loading starts for the last assistant message
+      intervalId = setInterval(() => {
+        setCurrentLoadingMessageIndex(
+          (prevIndex) => (prevIndex + 1) % loadingMessages.length,
+        );
+      }, 2500); // Change message every 2.5 seconds
+    } else {
+      // Reset index when loading stops or it's not the target message
+      setCurrentLoadingMessageIndex(0);
+    }
+
+    // Cleanup interval on component unmount or when loading/isLast changes
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+    // Add message.role to dependencies to reset if role changes unexpectedly
+  }, [loading, isLast, message.role, loadingMessages.length]);
+
+  // --- End Loading Animation Text State ---
 
   useEffect(() => {
     const citationRegex = /\[([^\]]+)\]/g;
@@ -220,6 +258,17 @@ const MessageBox = ({
     });
   }, [message.content, message.references]);
 
+  // --- Typewriter Logic ---
+  // Only apply typewriter effect to the last assistant message when not loading
+  const isTyping = !loading && isLast && message.role === 'assistant';
+  // Pass the FINAL prepared content to the typewriter
+  const typedContent = useTypewriter(
+    isTyping ? contentWithPlaceholders : '',
+    1,
+  );
+
+  // --- End Typewriter Logic ---
+
   // Check if references and doc_aggs exist (consistent variable name)
   const hasReferences =
     message.references?.doc_aggs && message.references.doc_aggs.length > 0;
@@ -240,149 +289,176 @@ const MessageBox = ({
         </div>
       )}
 
-      {message.role === 'assistant' && (
-        <div className="flex flex-col space-y-9 lg:space-y-0 lg:flex-row lg:justify-between lg:space-x-9">
-          <div
-            ref={dividerRef}
-            className="flex flex-col space-y-6 w-full lg:w-9/12"
-          >
-            {message.sources && message.sources.length > 0 && (
-              <div className="flex flex-col space-y-2">
-                <div className="flex flex-row items-center space-x-2">
-                  <BookCopy className="text-black dark:text-white" size={20} />
-                  <h3 className="text-black dark:text-white font-medium text-xl">
-                    Sources
-                  </h3>
-                </div>
-                <MessageSources sources={message.sources} />
-              </div>
-            )}
-            <div className="flex flex-col space-y-2">
-              <div className="flex flex-row items-center space-x-2">
-                <Disc3
-                  className={cn(
-                    'text-black dark:text-white',
-                    isLast && loading ? 'animate-spin' : 'animate-none',
-                  )}
-                  size={20}
-                />
-                <h3 className="text-black dark:text-white font-medium text-xl">
-                  Answer
-                </h3>
-              </div>
-
-              <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
-                {/* Render the potentially modified content using a single Markdown component */}
-                {/* Use contentWithPlaceholders which includes citation tags if references exist */}
-                <Markdown options={markdownOverrides}>
-                  {contentWithPlaceholders}
-                </Markdown>
-
-                {/* Referenced Documents list rendered *within* the prose div */}
-                {hasReferences && (
-                  <div className="mt-6 border-t pt-4 border-gray-200 dark:border-gray-700 not-prose">
-                    {' '}
-                    {/* Add not-prose to list container */}
-                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                      Referenced Documents:
-                    </h4>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
-                      {message.references?.doc_aggs?.map(
-                        (agg: RagflowDocAgg, index: number) => (
-                          <li
-                            key={index}
-                            className="truncate"
-                            title={agg.doc_name}
-                          >
-                            {agg.doc_name || 'Unknown Document'}
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              {loading && isLast ? null : (
-                <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
-                  <div className="flex flex-row items-center space-x-1">
-                    <Rewrite rewrite={rewrite} messageId={message.messageId} />
-                  </div>
-                  <div className="flex flex-row items-center space-x-1">
-                    <Copy initialMessage={message.content} message={message} />
-                    <button
-                      onClick={() => {
-                        if (speechStatus === 'started') {
-                          stop();
-                        } else {
-                          start();
-                        }
-                      }}
-                      className="p-2 text-black/70 dark:text-white/70 rounded-xl hover:bg-light-secondary dark:hover:bg-dark-secondary transition duration-200 hover:text-black dark:hover:text-white"
-                    >
-                      {speechStatus === 'started' ? (
-                        <StopCircle size={18} />
-                      ) : (
-                        <Volume2 size={18} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {isLast &&
-                message.suggestions &&
-                message.suggestions.length > 0 &&
-                message.role === 'assistant' &&
-                !loading && (
-                  <>
-                    <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
-                    <div className="flex flex-col space-y-3 text-black dark:text-white">
-                      <div className="flex flex-row items-center space-x-2 mt-4">
-                        <Layers3 />
-                        <h3 className="text-xl font-medium">Related</h3>
-                      </div>
-                      <div className="flex flex-col space-y-3">
-                        {message.suggestions.map((suggestion, i) => (
-                          <div
-                            className="flex flex-col space-y-3 text-sm"
-                            key={i}
-                          >
-                            <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
-                            <div
-                              onClick={() => {
-                                sendMessage(suggestion);
-                              }}
-                              className="cursor-pointer flex flex-row justify-between font-medium space-x-2 items-center"
-                            >
-                              <p className="transition duration-200 hover:text-[#24A0ED]">
-                                {suggestion}
-                              </p>
-                              <Plus
-                                size={20}
-                                className="text-[#24A0ED] flex-shrink-0"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+      {message.role === 'assistant' &&
+        (loading && isLast ? (
+          <div className="flex flex-col space-y-2 items-start w-full lg:w-9/12 mt-4 mb-6">
+            <div className="flex flex-row items-center space-x-2">
+              <Loader2
+                className="text-black dark:text-white animate-spin"
+                size={20}
+              />
+              <h3 className="text-black dark:text-white font-medium text-xl">
+                {/* Display dynamic loading message */}
+                {loadingMessages[currentLoadingMessageIndex]}
+              </h3>
             </div>
           </div>
-          <div className="lg:sticky lg:top-20 flex flex-col items-center space-y-3 w-full lg:w-3/12 z-30 h-full pb-4">
-            <SearchImages
-              query={history[messageIndex - 1].content}
-              chatHistory={history.slice(0, messageIndex - 1)}
-              messageId={message.messageId}
-            />
-            <SearchVideos
-              chatHistory={history.slice(0, messageIndex - 1)}
-              query={history[messageIndex - 1].content}
-              messageId={message.messageId}
-            />
+        ) : (
+          <div className="flex flex-col space-y-9 lg:space-y-0 lg:flex-row lg:justify-between lg:space-x-9">
+            <div
+              ref={dividerRef}
+              className="flex flex-col space-y-6 w-full lg:w-9/12"
+            >
+              {message.sources && message.sources.length > 0 && (
+                <div className="flex flex-col space-y-2">
+                  <div className="flex flex-row items-center space-x-2">
+                    <BookCopy
+                      className="text-black dark:text-white"
+                      size={20}
+                    />
+                    <h3 className="text-black dark:text-white font-medium text-xl">
+                      Sources
+                    </h3>
+                  </div>
+                  <MessageSources sources={message.sources} />
+                </div>
+              )}
+              <div className="flex flex-col space-y-2">
+                <div className="flex flex-row items-center space-x-2">
+                  <Disc3
+                    className={cn(
+                      'text-black dark:text-white',
+                      isLast && loading ? 'animate-spin' : 'animate-none',
+                    )}
+                    size={20}
+                  />
+                  <h3 className="text-black dark:text-white font-medium text-xl">
+                    Answer
+                  </h3>
+                </div>
+
+                <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
+                  <Markdown options={markdownOverrides}>
+                    {isTyping ? typedContent : contentWithPlaceholders}
+                  </Markdown>
+
+                  {hasReferences &&
+                    (!isTyping ||
+                      typedContent.length ===
+                        contentWithPlaceholders.length) && (
+                      <div className="mt-6 border-t pt-4 border-gray-200 dark:border-gray-700 not-prose">
+                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                          Referenced Documents:
+                        </h4>
+                        <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                          {message.references?.doc_aggs?.map(
+                            (agg: RagflowDocAgg, index: number) => (
+                              <li
+                                key={index}
+                                className="truncate"
+                                title={agg.doc_name}
+                              >
+                                {agg.doc_name || 'Unknown Document'}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                </div>
+                {loading && isLast
+                  ? null
+                  : (!isTyping ||
+                      typedContent.length ===
+                        contentWithPlaceholders.length) && (
+                      <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
+                        <div className="flex flex-row items-center space-x-1">
+                          <Rewrite
+                            rewrite={rewrite}
+                            messageId={message.messageId}
+                          />
+                        </div>
+                        <div className="flex flex-row items-center space-x-1">
+                          <Copy
+                            initialMessage={message.content}
+                            message={message}
+                          />
+                          <button
+                            onClick={() => {
+                              if (speechStatus === 'started') {
+                                stop();
+                              } else {
+                                start();
+                              }
+                            }}
+                            className="p-2 text-black/70 dark:text-white/70 rounded-xl hover:bg-light-secondary dark:hover:bg-dark-secondary transition duration-200 hover:text-black dark:hover:text-white"
+                          >
+                            {speechStatus === 'started' ? (
+                              <StopCircle size={18} />
+                            ) : (
+                              <Volume2 size={18} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                {isLast &&
+                  message.suggestions &&
+                  message.suggestions.length > 0 &&
+                  message.role === 'assistant' &&
+                  !loading &&
+                  (!isTyping ||
+                    typedContent.length === contentWithPlaceholders.length) && (
+                    <>
+                      <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
+                      <div className="flex flex-col space-y-3 text-black dark:text-white">
+                        <div className="flex flex-row items-center space-x-2 mt-4">
+                          <Layers3 />
+                          <h3 className="text-xl font-medium">Related</h3>
+                        </div>
+                        <div className="flex flex-col space-y-3">
+                          {message.suggestions.map((suggestion, i) => (
+                            <div
+                              className="flex flex-col space-y-3 text-sm"
+                              key={i}
+                            >
+                              <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
+                              <div
+                                onClick={() => {
+                                  sendMessage(suggestion);
+                                }}
+                                className="cursor-pointer flex flex-row justify-between font-medium space-x-2 items-center"
+                              >
+                                <p className="transition duration-200 hover:text-[#24A0ED]">
+                                  {suggestion}
+                                </p>
+                                <Plus
+                                  size={20}
+                                  className="text-[#24A0ED] flex-shrink-0"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+              </div>
+            </div>
+            <div className="lg:sticky lg:top-20 flex flex-col items-center space-y-3 w-full lg:w-3/12 z-30 h-full pb-4">
+              <SearchImages
+                query={history[messageIndex - 1].content}
+                chatHistory={history.slice(0, messageIndex - 1)}
+                messageId={message.messageId}
+              />
+              <SearchVideos
+                chatHistory={history.slice(0, messageIndex - 1)}
+                query={history[messageIndex - 1].content}
+                messageId={message.messageId}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        ))}
     </div>
   );
 };

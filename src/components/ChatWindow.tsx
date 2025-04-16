@@ -14,6 +14,7 @@ import Link from 'next/link';
 import NextError from 'next/error';
 import { type RagflowReference } from '@/lib/types';
 // import { MessageSuggestions } from './MessageSuggestions'; // Temporarily commented out
+import { v4 as uuidv4 } from 'uuid';
 
 export type Message = {
   messageId: string;
@@ -341,298 +342,210 @@ const ChatWindow = ({ id }: { id?: string }) => {
     }
 
     setLoading(true);
-    setMessageAppeared(false);
+    const chatId = searchParams.get('id') || uuidv4(); // Use existing or create new
+    if (!searchParams.get('id')) {
+      window.history.replaceState(null, '', `/?id=${chatId}`);
+    }
 
-    messageId = messageId ?? crypto.randomBytes(7).toString('hex');
-    const aiMessageId = crypto.randomBytes(7).toString('hex');
+    const humanMessageId = uuidv4();
+    const newUserMessage: Message = {
+      role: 'user',
+      content: message,
+      messageId: humanMessageId,
+      chatId: chatId,
+      createdAt: new Date(),
+    };
 
-    setMessages((prevMessages) => [
-      ...prevMessages,
-      {
-        content: message,
-        messageId: messageId!,
-        chatId: chatId!,
-        role: 'user',
-        createdAt: new Date(),
-      },
-    ]);
+    // Add user message
+    setMessages((prev) => [...prev, newUserMessage]);
 
-    let currentContent = '';
-    let currentReferences: RagflowReference | undefined = undefined;
-    let sources: Document[] | undefined = undefined;
-    let assistantMessageAdded = false;
+    // Add empty assistant message placeholder immediately
+    const assistantMessageId = uuidv4();
+    const assistantPlaceholderMessage: Message = {
+      role: 'assistant',
+      content: '', // Start with empty content (will show loader)
+      messageId: assistantMessageId,
+      chatId: chatId,
+      createdAt: new Date(),
+      references: undefined,
+    };
+    setMessages((prev) => [...prev, assistantPlaceholderMessage]);
 
-    const messageHandler = async (data: any) => {
-      const targetMessageId = aiMessageId;
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: {
+            messageId: humanMessageId,
+            chatId: chatId,
+            content: message,
+          },
+          history: messages.slice(0, -1), // Send history *before* adding placeholder
+          focusMode: searchParams.get('fm') || 'webSearch',
+          searchMode: searchMode,
+          // ... other body parameters ...
+          chatModel: {
+            provider: chatModelProvider.provider,
+            name: chatModelProvider.name,
+          },
+          embeddingModel: {
+            provider: embeddingModelProvider.provider,
+            name: embeddingModelProvider.name,
+          },
+          systemInstructions: localStorage.getItem('systemInstructions'),
+          files: files,
+          optimizationMode: optimizationMode,
+        }),
+      });
 
-      if (data.type === 'error') {
-        toast.error(data.data);
-        setLoading(false);
-        return;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'API request failed');
       }
 
-      if (data.type === 'sources') {
-        sources = data.data;
-        if (!assistantMessageAdded) {
-          setMessages((prevMessages) => [
-            ...prevMessages,
-            {
-              content: '',
-              messageId: targetMessageId,
-              chatId: chatId!,
-              role: 'assistant',
-              sources: sources,
-              createdAt: new Date(),
-            },
-          ]);
-          assistantMessageAdded = true;
-        }
-        setMessageAppeared(true);
-      }
+      // --- Response Handling ---
+      // Use the component's state `searchMode` directly for logic
+      // Remove the redundant local declaration below:
+      // const searchMode = (searchParams.get('sm') as SearchMode) || 'web';
 
-      if (data.type === 'references') {
-        console.log(
-          '[messageHandler] Received references event with data:',
-          JSON.stringify(data.data, null, 2),
-        );
-        currentReferences = data.data as RagflowReference;
-        return;
-      }
+      if (searchMode === 'docs') {
+        // This now correctly refers to the component state
+        // --- Non-Streaming Response Handling ---
+        const result = await response.json();
+        console.log('Received final RAGflow response:', result);
 
-      if (data.type === 'message') {
-        currentContent = data.data;
-
-        if (!assistantMessageAdded) {
-          setMessages((prevMessages) => [
-            ...prevMessages,
-            {
-              content: currentContent,
-              messageId: targetMessageId,
-              chatId: chatId!,
-              role: 'assistant',
-              sources: sources,
-              references: undefined,
-              createdAt: new Date(),
-            },
-          ]);
-          assistantMessageAdded = true;
-        } else {
+        if (result.type === 'finalResponse') {
+          // Update the placeholder message with the final content and references
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.messageId === targetMessageId
-                ? { ...msg, content: currentContent }
+              msg.messageId === assistantMessageId
+                ? {
+                    ...msg,
+                    content: result.data.content,
+                    references: result.data.references,
+                  }
                 : msg,
             ),
           );
+        } else if (result.type === 'error') {
+          // Handle potential error in JSON response
+          throw new Error(result.data || 'Received error from API');
+        } else {
+          // Handle unexpected response format
+          throw new Error('Unexpected response format from API');
         }
-        setMessageAppeared(true);
-      }
-
-      if (data.type === 'messageEnd') {
-        console.log(
-          '[messageEnd] Finalizing state. currentReferences:',
-          JSON.stringify(currentReferences, null, 2),
-        );
-
-        setChatHistory((prevHistory) => [
-          ...prevHistory,
-          ['human', message],
-          ['assistant', currentContent],
-        ]);
-        setLoading(false);
-
-        setMessages((prev) => {
-          const updatedMessages = prev.map((msg) =>
-            msg.messageId === targetMessageId
-              ? {
-                  ...msg,
-                  content: currentContent,
-                  references: currentReferences,
-                }
-              : msg,
-          );
-          const finalMsg = updatedMessages.find(
-            (m) => m.messageId === targetMessageId,
-          );
-          console.log(
-            '[messageEnd] Message object prepared for state update:',
-            JSON.stringify(finalMsg, null, 2),
-          );
-          return updatedMessages;
-        });
-
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-
-        const autoImageSearch = localStorage.getItem('autoImageSearch');
-        const autoVideoSearch = localStorage.getItem('autoVideoSearch');
-
-        if (autoImageSearch === 'true') {
-          document
-            .getElementById(`search-images-${lastMsg.messageId}`)
-            ?.click();
+      } else {
+        // --- Streaming Response Handling (for non-docs modes) ---
+        if (!response.body) {
+          throw new Error('Response body is null for streaming mode');
         }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let partialChunk = '';
+        let currentContent = '';
+        let currentSources: Document[] | undefined = undefined; // For non-RAGflow sources
 
-        if (autoVideoSearch === 'true') {
-          document
-            .getElementById(`search-videos-${lastMsg.messageId}`)
-            ?.click();
-        }
-
-        if (
-          lastMsg.role === 'assistant' &&
-          lastMsg.sources &&
-          lastMsg.sources.length > 0 &&
-          !lastMsg.suggestions
-        ) {
-          const suggestions = await getSuggestions(messagesRef.current);
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg.messageId === lastMsg.messageId) {
-                return { ...msg, suggestions: suggestions };
-              }
-              return msg;
-            }),
-          );
-        }
-
-        // console.log('[messageEnd] Generating suggestions...');
-        // try {
-        //   const suggestions = await getSuggestions(message);
-        //   // console.log('[messageEnd] Received suggestions:', suggestions);
-        //   setMessages((prev) =>
-        //     prev.map((msg) =>
-        //       msg.messageId === targetMessageId
-        //         ? { ...msg, suggestions: suggestions ?? [] }
-        //         : msg,
-        //     ),
-        //   );
-        // } catch (suggestionError) {
-        //   console.error('[messageEnd] Error getting suggestions:', suggestionError);
-        // }
-      }
-    };
-
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content: message,
-        message: {
-          messageId: messageId,
-          chatId: chatId!,
-          content: message,
-        },
-        chatId: chatId!,
-        files: fileIds,
-        focusMode: focusMode,
-        searchMode: searchMode,
-        optimizationMode: optimizationMode,
-        history: chatHistory,
-        chatModel: {
-          name: chatModelProvider.name,
-          provider: chatModelProvider.provider,
-        },
-        embeddingModel: {
-          name: embeddingModelProvider.name,
-          provider: embeddingModelProvider.provider,
-        },
-        systemInstructions: localStorage.getItem('systemInstructions'),
-      }),
-    });
-
-    if (!res.body) throw new Error('No response body');
-
-    const reader = res.body?.getReader();
-    const decoder = new TextDecoder('utf-8');
-
-    let partialChunk = '';
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        console.log('[Stream Reader] Stream finished (done=true).');
-        break;
-      }
-
-      // Log the raw decoded chunk received
-      const decodedChunk = decoder.decode(value, { stream: true });
-      console.log(
-        '[Stream Reader] Received raw decoded chunk:',
-        JSON.stringify(decodedChunk),
-      );
-
-      // Append new data to the partial chunk
-      partialChunk += decodedChunk;
-      console.log(
-        '[Stream Parser] Current partialChunk before processing:',
-        JSON.stringify(partialChunk),
-      );
-
-      // Try to process all complete JSON objects separated by newline
-      let newlineIndex;
-      while ((newlineIndex = partialChunk.indexOf('\n')) >= 0) {
-        const jsonString = partialChunk.substring(0, newlineIndex).trim();
-        const remaining = partialChunk.substring(newlineIndex + 1);
-
-        console.log(
-          `[Stream Parser] Found newline. JSON string: ${JSON.stringify(jsonString)}, Remaining partialChunk: ${JSON.stringify(remaining)}`,
-        );
-
-        partialChunk = remaining; // Update partialChunk *after* logging
-
-        if (jsonString) {
-          try {
-            const json = JSON.parse(jsonString);
-            console.log(
-              '[Stream Parser] Successfully parsed JSON:',
-              JSON.stringify(json, null, 2),
+        // Define message handler for streaming parts
+        const messageHandler = (data: any) => {
+          // This handler now only processes non-RAGflow streams ('message', 'sources', 'messageEnd', 'error')
+          if (data.type === 'message') {
+            currentContent = data.data;
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageId === assistantMessageId
+                  ? { ...msg, content: currentContent }
+                  : msg,
+              ),
             );
+          } else if (data.type === 'sources') {
+            currentSources = data.data;
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageId === assistantMessageId
+                  ? { ...msg, sources: currentSources }
+                  : msg,
+              ),
+            );
+          } else if (data.type === 'error') {
+            toast.error(data.data);
+            // Remove placeholder on error?
+            setMessages((prev) =>
+              prev.filter((msg) => msg.messageId !== assistantMessageId),
+            );
+            // Potentially re-throw or handle differently
+          } else if (data.type === 'messageEnd') {
+            // Final update for content/sources just in case
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageId === assistantMessageId
+                  ? { ...msg, content: currentContent, sources: currentSources }
+                  : msg,
+              ),
+            );
+          }
+        };
+
+        // Stream processing loop (similar to before, but only for non-docs)
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            console.log('[Stream Reader] Stream finished (non-docs).');
+            break;
+          }
+          const decodedChunk = decoder.decode(value, { stream: true });
+          partialChunk += decodedChunk;
+
+          let newlineIndex;
+          while ((newlineIndex = partialChunk.indexOf('\n')) >= 0) {
+            const jsonString = partialChunk.substring(0, newlineIndex).trim();
+            partialChunk = partialChunk.substring(newlineIndex + 1);
+            if (jsonString) {
+              try {
+                const json = JSON.parse(jsonString);
+                messageHandler(json);
+              } catch (error) {
+                console.error(
+                  '[Stream Parser] Failed to parse JSON chunk (non-docs):',
+                  jsonString,
+                  error,
+                );
+              }
+            }
+          }
+        }
+        // Handle final chunk if any (non-docs)
+        const remainingJsonString = partialChunk.trim();
+        if (remainingJsonString) {
+          try {
+            const json = JSON.parse(remainingJsonString);
             messageHandler(json);
           } catch (error) {
             console.error(
-              '[Stream Parser] Failed to parse JSON chunk:',
-              jsonString,
+              '[Stream Parser] Failed to parse final JSON chunk (non-docs):',
+              remainingJsonString,
               error,
             );
           }
         }
       }
-      console.log(
-        '[Stream Parser] Current partialChunk after processing newlines:',
-        JSON.stringify(partialChunk),
+    } catch (error) {
+      console.error('sendMessage error:', error);
+      toast.error(`Error: ${(error as Error).message}`);
+      // Remove placeholder on fetch error
+      setMessages((prev) =>
+        prev.filter(
+          (msg) => msg.messageId !== assistantPlaceholderMessage.messageId,
+        ),
       );
-    } // End of while loop
-
-    console.log(
-      '[Stream Parser] Loop finished. Final partialChunk:',
-      JSON.stringify(partialChunk),
-    );
-
-    // After the loop, try to parse any remaining data in partialChunk
-    const remainingJsonString = partialChunk.trim();
-    if (remainingJsonString) {
-      console.log(
-        '[Stream Parser] Attempting to parse final remaining chunk:',
-        JSON.stringify(remainingJsonString),
-      );
-      try {
-        const json = JSON.parse(remainingJsonString);
-        console.log(
-          '[Stream Parser] Successfully parsed final JSON chunk:',
-          JSON.stringify(json, null, 2),
-        );
-        messageHandler(json);
-      } catch (error) {
-        console.error(
-          '[Stream Parser] Failed to parse final JSON chunk:',
-          remainingJsonString,
-          error,
-        );
-      }
-    } else {
-      console.log('[Stream Parser] No final remaining chunk to parse.');
+    } finally {
+      setLoading(false);
+      // Input clearing should be handled by the Input component itself
+      // after successfully calling sendMessage.
+      // Reset file uploads if needed
+      // setFiles([]);
     }
   };
 

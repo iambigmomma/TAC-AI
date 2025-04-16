@@ -23,7 +23,7 @@ import {
   getCustomOpenaiModelName,
 } from '@/lib/config';
 import { SearchMode } from '@/components/ChatWindow';
-import { getRagflowChatCompletion } from '@/lib/ragflow';
+import { getRagflowChatCompletionNonStream } from '@/lib/ragflow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,82 +54,6 @@ type Body = {
   chatModel: ChatModel;
   embeddingModel: EmbeddingModel;
   systemInstructions: string;
-};
-
-const handleEmitterEvents = async (
-  stream: EventEmitter,
-  writer: WritableStreamDefaultWriter,
-  encoder: TextEncoder,
-  aiMessageId: string,
-  chatId: string,
-) => {
-  let recievedMessage = '';
-  let sources: any[] = [];
-
-  stream.on('data', (data) => {
-    const parsedData = JSON.parse(data);
-    if (parsedData.type === 'response') {
-      writer.write(
-        encoder.encode(
-          JSON.stringify({
-            type: 'message',
-            data: parsedData.data,
-            messageId: aiMessageId,
-          }) + '\n',
-        ),
-      );
-
-      recievedMessage += parsedData.data;
-    } else if (parsedData.type === 'sources') {
-      writer.write(
-        encoder.encode(
-          JSON.stringify({
-            type: 'sources',
-            data: parsedData.data,
-            messageId: aiMessageId,
-          }) + '\n',
-        ),
-      );
-
-      sources = parsedData.data;
-    }
-  });
-  stream.on('end', () => {
-    writer.write(
-      encoder.encode(
-        JSON.stringify({
-          type: 'messageEnd',
-          messageId: aiMessageId,
-        }) + '\n',
-      ),
-    );
-    writer.close();
-
-    db.insert(messagesSchema)
-      .values({
-        content: recievedMessage,
-        chatId: chatId,
-        messageId: aiMessageId,
-        role: 'assistant',
-        metadata: JSON.stringify({
-          createdAt: new Date(),
-          ...(sources && sources.length > 0 && { sources }),
-        }),
-      })
-      .execute();
-  });
-  stream.on('error', (data) => {
-    const parsedData = JSON.parse(data);
-    writer.write(
-      encoder.encode(
-        JSON.stringify({
-          type: 'error',
-          data: parsedData.data,
-        }),
-      ),
-    );
-    writer.close();
-  });
 };
 
 const handleHistorySave = async (
@@ -294,30 +218,129 @@ export const POST = async (req: Request) => {
 
     await handleHistorySave(message, humanMessageId, focusMode, body.files);
 
-    const responseStream = new TransformStream();
-    const writer = responseStream.writable.getWriter();
-    const encoder = new TextEncoder();
-    const searchEmitter = new EventEmitter();
-
     if (searchMode === 'docs') {
-      console.log(`Executing RAGflow Chat search for appChatId: ${chatId}...`);
-      const ragflowStream = getRagflowChatCompletion(chatId, message.content);
+      console.log(
+        `Executing RAGflow Chat search (non-streaming) for appChatId: ${chatId}...`,
+      );
+      const result = await getRagflowChatCompletionNonStream(
+        chatId,
+        message.content,
+      );
 
-      return new Response(ragflowStream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          Connection: 'keep-alive',
-          'Cache-Control': 'no-cache, no-transform',
+      await db
+        .insert(messagesSchema)
+        .values({
+          content: result.content,
+          chatId: chatId,
+          messageId: aiMessageId,
+          role: 'assistant',
+          metadata: JSON.stringify({
+            createdAt: new Date(),
+            ...(result.references && { references: result.references }),
+          }),
+        })
+        .execute();
+
+      return Response.json({
+        type: 'finalResponse',
+        data: {
+          content: result.content,
+          references: result.references,
         },
+        messageId: aiMessageId,
       });
     } else {
-      handleEmitterEvents(searchEmitter, writer, encoder, aiMessageId, chatId);
+      const responseStream = new TransformStream();
+      const writer = responseStream.writable.getWriter();
+      const encoder = new TextEncoder();
+      const searchEmitter = new EventEmitter();
+
+      const handleNonRagflowStream = async (
+        emitter: EventEmitter,
+        streamWriter: WritableStreamDefaultWriter,
+        textEncoder: TextEncoder,
+        msgId: string,
+        cId: string,
+      ) => {
+        let recievedMessage = '';
+        let sources: any[] = [];
+        emitter.on('data', (data) => {
+          const parsedData = JSON.parse(data);
+          if (parsedData.type === 'response') {
+            streamWriter.write(
+              textEncoder.encode(
+                JSON.stringify({
+                  type: 'message',
+                  data: parsedData.data,
+                  messageId: msgId,
+                }) + '\n',
+              ),
+            );
+            recievedMessage += parsedData.data;
+          } else if (parsedData.type === 'sources') {
+            streamWriter.write(
+              textEncoder.encode(
+                JSON.stringify({
+                  type: 'sources',
+                  data: parsedData.data,
+                  messageId: msgId,
+                }) + '\n',
+              ),
+            );
+            sources = parsedData.data;
+          }
+        });
+        emitter.on('end', () => {
+          streamWriter.write(
+            textEncoder.encode(
+              JSON.stringify({
+                type: 'messageEnd',
+                messageId: msgId,
+              }) + '\n',
+            ),
+          );
+          streamWriter.close();
+
+          db.insert(messagesSchema)
+            .values({
+              content: recievedMessage,
+              chatId: cId,
+              messageId: msgId,
+              role: 'assistant',
+              metadata: JSON.stringify({
+                createdAt: new Date(),
+                ...(sources && sources.length > 0 && { sources }),
+              }),
+            })
+            .execute();
+        });
+        emitter.on('error', (data) => {
+          const parsedData = JSON.parse(data);
+          streamWriter.write(
+            textEncoder.encode(
+              JSON.stringify({
+                type: 'error',
+                data: parsedData.data,
+                messageId: msgId,
+              }) + '\n',
+            ),
+          );
+          streamWriter.close();
+        });
+      };
+
+      handleNonRagflowStream(
+        searchEmitter,
+        writer,
+        encoder,
+        aiMessageId,
+        chatId,
+      );
 
       console.log(
         `Executing Web/Both search (mode: ${searchMode}, focus: ${focusMode})...`,
       );
       const selectedPrompts = getPromptsForFocus(focusMode);
-
       const agentConfig = {
         searchWeb: true,
         rerank: true,
@@ -327,20 +350,13 @@ export const POST = async (req: Request) => {
         responsePrompt: selectedPrompts.responsePrompt,
         activeEngines: ['google'],
       };
-
       const agent = new MetaSearchAgent(agentConfig);
-
       const historyMessages: BaseMessage[] = body.history.map((msg) => {
-        if (msg[0] === 'human') {
-          return new HumanMessage(msg[1]);
-        } else {
-          return new AIMessage(msg[1]);
-        }
+        if (msg[0] === 'human') return new HumanMessage(msg[1]);
+        else return new AIMessage(msg[1]);
       });
-
       const systemInstructions =
         body.systemInstructions || selectedPrompts.responsePrompt;
-
       const agentEmitter = await agent.searchAndAnswer(
         message.content,
         historyMessages,
@@ -350,7 +366,7 @@ export const POST = async (req: Request) => {
         body.files,
         systemInstructions,
       );
-
+      agentEmitter.on('data', (data) => searchEmitter.emit('data', data));
       agentEmitter.on('end', () => searchEmitter.emit('end'));
       agentEmitter.on('error', (error) => searchEmitter.emit('error', error));
 
@@ -363,7 +379,10 @@ export const POST = async (req: Request) => {
       });
     }
   } catch (e) {
-    console.error(e);
-    return Response.json({ error: (e as Error).message }, { status: 500 });
+    console.error('API Route Error:', e);
+    return Response.json(
+      { error: `Server error: ${(e as Error).message}` },
+      { status: 500 },
+    );
   }
 };

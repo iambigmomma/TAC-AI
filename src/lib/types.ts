@@ -24,4 +24,21 @@ export interface RagflowReference {
   prompt?: string;
 }
 
+// --- Types needed for stream parsing (even if temporary) ---
+
+// Interface for the data field within a streaming chunk's data object
+// Note: This might differ slightly from non-streaming data structure
+export interface RagflowCompletionData {
+  answer: string;
+  session_id: string;
+  reference?: RagflowReference; // Reference might appear in chunks too
+}
+
+// Interface for the overall streaming chunk structure received from RAGflow
+export interface RagflowStreamChunk {
+  code: number;
+  message: string;
+  data: RagflowCompletionData | boolean; // Data can be object or boolean(true)
+}
+
 // Add other shared types here if needed

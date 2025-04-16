@@ -11,252 +11,44 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto'; // Import randomUUID
 import {
   RagflowReference,
-  RagflowReferenceChunk,
-  RagflowDocAgg,
+  // Re-add types needed for temporary stream parsing
+  RagflowStreamChunk,
+  RagflowCompletionData,
+  // RagflowDocAgg, // Not needed directly here
 } from './types'; // Import shared types
 
-// Interface for the completion response data field
-interface RagflowCompletionData {
+// Interface for the non-streaming completion response data field
+interface RagflowNonStreamData {
   answer: string;
+  reference: RagflowReference; // References are included directly
   session_id: string;
-  reference?: RagflowReference; // Add optional reference field
+  // Other potential fields like 'created_at', 'latency' might exist
 }
 
-// Interface for the overall streaming chunk
-interface RagflowStreamChunk {
+// Interface for the overall non-streaming response
+interface RagflowNonStreamResponse {
   code: number;
   message: string;
-  data: RagflowCompletionData | boolean; // Can be boolean(true) for end signal
+  data: RagflowNonStreamData;
 }
 
 // Remove the hardcoded opener message
 // const RAGFLOW_OPENER_MESSAGE = ...;
 
-// Function to process the actual RAGflow response stream and forward to frontend
-const processRagflowStream = (
-  ragflowResponseStream: Readable,
-  controller: ReadableStreamDefaultController<any>, // Pass the controller
-  messageId: string, // Pass the messageId for messageEnd event
-  appChatId: string,
-  initialSessionId: string | null, // Used to know if we need to save a new ID
-) => {
-  let buffer = '';
-  let firstChunkProcessed = !initialSessionId; // Consider first chunk processed if session existed
-  let savedSessionId = initialSessionId;
-  let lastReferenceData: RagflowReference | null = null; // Track the last reference object
-
-  ragflowResponseStream.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString('utf-8');
-    // console.log('--- Buffer Updated ---\n', buffer, '\n--- End Buffer ---'); // Debug log
-
-    let nextMessageIndex;
-    while (
-      (nextMessageIndex = buffer.indexOf('\ndata:')) !== -1 ||
-      (buffer.startsWith('data:') && buffer.indexOf('\ndata:', 5) === -1) || // Handle single message case
-      (buffer.startsWith('data:') && buffer.indexOf('\ndata:', 5) !== -1) // Handle first message when multiple exist
-    ) {
-      let messageEndIndex;
-      let startIndex = buffer.startsWith('data:') ? 5 : nextMessageIndex + 6; // 6 is length of '\ndata:'
-      let nextDataPrefixIndex = buffer.indexOf('\ndata:', startIndex);
-
-      // Determine the end of the current message block
-      if (nextDataPrefixIndex !== -1) {
-        messageEndIndex = nextDataPrefixIndex;
-      } else {
-        // If no more '\ndata:' prefixes, the rest of the buffer is the potential message
-        messageEndIndex = buffer.length;
-      }
-
-      const jsonStr = buffer.substring(startIndex, messageEndIndex).trim();
-      const processedLength =
-        buffer.startsWith('data:') && nextMessageIndex === -1
-          ? buffer.length
-          : messageEndIndex;
-
-      if (!jsonStr) {
-        // If jsonStr is empty, it means we likely just have delimiters
-        // Remove the processed part from buffer and continue
-        buffer = buffer.substring(processedLength);
-        continue;
-      }
-
-      try {
-        // Attempt to parse the extracted JSON string
-        const parsedChunk: RagflowStreamChunk = JSON.parse(jsonStr);
-        console.log('Successfully parsed RAGflow chunk:', parsedChunk);
-
-        // --- Process the valid parsedChunk ---
-        if (parsedChunk.code !== 0) {
-          // ... handle error chunk ...
-          controller.error(
-            new Error(parsedChunk.message || 'RAGflow stream error'),
-          );
-          // Potentially stop processing further? Or just log?
-          // Depending on the error code, we might want to break the loop or stop the stream.
-        } else if (
-          typeof parsedChunk.data === 'boolean' &&
-          parsedChunk.data === true
-        ) {
-          console.log('RAGflow boolean end signal received.');
-          // This might indicate the end, but we rely on the stream 'end' event primarily
-        } else if (typeof parsedChunk.data === 'object') {
-          const completionData = parsedChunk.data as RagflowCompletionData;
-          // Save session ID
-          if (!firstChunkProcessed && completionData.session_id) {
-            if (!initialSessionId) {
-              savedSessionId = completionData.session_id;
-              console.log(
-                `Received new RAGflow session ID: ${savedSessionId}, saving...`,
-              );
-              db.update(chats)
-                .set({ ragflowSessionId: savedSessionId })
-                .where(eq(chats.id, appChatId))
-                .execute()
-                .catch((dbError) =>
-                  console.error('DB update error saving session ID:', dbError),
-                );
-            }
-            firstChunkProcessed = true;
-          }
-          // Emit response/references
-          if (completionData.answer) {
-            const messageChunkString =
-              JSON.stringify({
-                type: 'message',
-                data: completionData.answer,
-                messageId, // Include messageId here
-              }) + '\n';
-            controller.enqueue(messageChunkString);
-          }
-          // --- Store Last Reference (DON'T EMIT YET) ---
-          if (completionData.reference) {
-            // Check if reference object exists
-            if (completionData.reference.chunks?.length > 0) {
-              // Valid reference with chunks found
-              // console.log('Storing last reference data:', completionData.reference);
-              lastReferenceData = completionData.reference; // Assign the valid object
-            } else {
-              // Explicitly set to null if the reference object itself is null
-              // or if it exists but has no chunks (shouldn't happen based on RAGflow, but safe)
-              lastReferenceData = null;
-            }
-          } else {
-            // Explicitly set to null if the reference object itself is null
-            // or if it exists but has no chunks (shouldn't happen based on RAGflow, but safe)
-            lastReferenceData = null;
-          }
-        }
-        // --- End processing valid chunk ---
-
-        // Remove the successfully processed message from the buffer
-        buffer = buffer.substring(processedLength);
-      } catch (e) {
-        // JSON parsing failed - likely an incomplete message
-        // console.error('Incomplete JSON chunk, waiting for more data. Buffer:', buffer); // Debug log
-        // console.error('Failed segment:', jsonStr); // Debug log
-        // Break the inner loop and wait for the next 'data' event to append more data
-        break;
-      }
-    }
-  });
-
-  ragflowResponseStream.on('end', () => {
-    console.log('[RAGflow Stream] Original stream ended.');
-    // Emit the last valid reference data collected, if any
-    if (lastReferenceData) {
-      const referenceEventString =
-        JSON.stringify({
-          type: 'references',
-          data: lastReferenceData,
-        }) + '\n';
-      console.log(
-        '[RAGflow Stream] Attempting to enqueue final references:',
-        referenceEventString,
-      );
-      try {
-        controller.enqueue(referenceEventString);
-        console.log('[RAGflow Stream] Successfully enqueued final references.');
-      } catch (e) {
-        console.error('[RAGflow Stream] Error enqueuing final references:', e);
-      }
-    }
-    // Always emit messageEnd after potentially sending references
-    const messageEndEventString =
-      JSON.stringify({ type: 'messageEnd', messageId }) + '\n';
-    console.log(
-      '[RAGflow Stream] Attempting to enqueue messageEnd:',
-      messageEndEventString,
-    );
-    try {
-      controller.enqueue(messageEndEventString);
-      console.log('[RAGflow Stream] Successfully enqueued messageEnd.');
-    } catch (e) {
-      console.error('[RAGflow Stream] Error enqueuing messageEnd:', e);
-    }
-
-    // Close the new stream
-    console.log('[RAGflow Stream] Closing the controller.');
-    controller.close();
-  });
-
-  ragflowResponseStream.on('error', (streamError: Error) => {
-    console.error('RAGflow stream error for frontend:', streamError);
-    controller.error(streamError);
-  });
-};
-
-// Main function called by the API route
-export const getRagflowChatCompletion = (
+// Modify the main export function signature - NO LONGER RETURNS ReadableStream
+export const getRagflowChatCompletionNonStream = async (
   appChatId: string,
   query: string,
-): ReadableStream => {
-  const apiUrl = getRagflowApiUrl();
-  const apiKey = getRagflowApiKey();
-  const ragflowChatAssistantId = getRagflowChatId();
-
-  // Generate a message ID for the assistant's response *once*
-  const messageId = randomUUID();
-
-  let controller: ReadableStreamDefaultController<any>;
-
-  const stream = new ReadableStream({
-    start(ctrl) {
-      controller = ctrl;
-      // Start the async operation *after* the stream is created and controller is assigned
-      startRagflowProcessing(appChatId, query, controller, messageId).catch(
-        (err) => {
-          console.error('[RAGflow Start] Error starting processing:', err);
-          try {
-            // Try to signal the error through the stream
-            controller.enqueue(
-              JSON.stringify({
-                type: 'error',
-                data: `Stream initialization failed: ${(err as Error).message}`,
-              }) + '\n',
-            );
-            controller.close();
-          } catch (e) {
-            console.error('Failed to enqueue initialization error:', e);
-          }
-        },
-      );
-    },
-    cancel(reason) {
-      console.log('[RAGflow Stream] Stream cancelled by consumer:', reason);
-      // Here you might want to add logic to abort ongoing axios requests if possible
-    },
-  });
-
-  return stream;
+): Promise<{ content: string; references: RagflowReference | null }> => {
+  // Call the refactored async logic function
+  return startRagflowProcessingNonStream(appChatId, query);
 };
 
-// New async function to contain the main logic, allowing stream creation first
-async function startRagflowProcessing(
+// Renamed async function to contain the main non-streaming logic
+async function startRagflowProcessingNonStream(
   appChatId: string,
   query: string,
-  controller: ReadableStreamDefaultController<any>,
-  messageId: string, // Receive messageId
-) {
+): Promise<{ content: string; references: RagflowReference | null }> {
   const apiUrl = getRagflowApiUrl();
   const apiKey = getRagflowApiKey();
   const ragflowChatAssistantId = getRagflowChatId();
@@ -267,192 +59,232 @@ async function startRagflowProcessing(
 
   const endpoint = `${apiUrl}/api/v1/chats/${ragflowChatAssistantId}/completions`;
   let knownRagflowSessionId: string | null = null;
+  let finalAnswer: string = '';
+  let finalReferences: RagflowReference | null = null;
 
   try {
-    // 1. Check DB for existing session ID
+    // 1. Check DB for existing session ID (same as before)
     const chatRecord = await db.query.chats.findFirst({
       where: eq(chats.id, appChatId),
       columns: { ragflowSessionId: true },
     });
     knownRagflowSessionId = chatRecord?.ragflowSessionId || null;
 
-    if (knownRagflowSessionId) {
-      // --- EXISTING SESSION ---
+    let sessionIdToUse = knownRagflowSessionId;
+
+    if (!sessionIdToUse) {
+      // --- CREATE NEW SESSION (Use streaming temporarily to get ID) ---
       console.log(
-        `Using existing RAGflow session ID: ${knownRagflowSessionId}`,
-      );
-      const response = await axios.post(
-        endpoint,
-        {
-          question: query,
-          stream: true,
-          session_id: knownRagflowSessionId,
-        },
-        {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          responseType: 'stream',
-          timeout: 180000,
-        },
-      );
-      // Process this stream directly for the frontend
-      processRagflowStream(
-        response.data as Readable,
-        controller, // Pass controller
-        messageId, // Pass messageId
-        appChatId,
-        knownRagflowSessionId,
-      );
-    } else {
-      // --- NEW SESSION ---
-      console.log(
-        `No RAGflow session ID for ${appChatId}. Creating new session first...`,
+        `No RAGflow session ID for ${appChatId}. Creating new session via stream...`,
       );
 
-      // Make the first call ONLY to create the session and get the ID
-      const firstCallPromise = new Promise<string>(async (resolve, reject) => {
-        try {
-          const firstResponse = await axios.post(
-            endpoint,
-            { question: query, stream: true }, // No session_id
-            {
-              headers: { Authorization: `Bearer ${apiKey}` },
-              responseType: 'stream',
-              timeout: 30000, // Shorter timeout for session creation
-            },
-          );
+      // Promise to handle the initial stream for session ID extraction
+      const newSessionId = await new Promise<string>(
+        async (resolve, reject) => {
+          try {
+            const firstResponse = await axios.post(
+              endpoint,
+              { question: query, stream: true }, // Use stream: true for first call
+              {
+                headers: { Authorization: `Bearer ${apiKey}` },
+                responseType: 'stream',
+                timeout: 30000, // Shorter timeout is ok for getting session ID
+              },
+            );
 
-          const firstStream = firstResponse.data as Readable;
-          let sessionIdFound: string | null = null;
-          let resolved = false;
-          let buffer = '';
+            const firstStream = firstResponse.data as Readable;
+            let sessionIdFound: string | null = null;
+            let resolved = false;
+            let buffer = '';
 
-          const onData = (chunk: Buffer) => {
-            if (resolved) return;
-            buffer += chunk.toString('utf-8');
-            let nextMessageIndex;
-            while (
-              (nextMessageIndex = buffer.indexOf('\ndata:')) !== -1 ||
-              (buffer.startsWith('data:') &&
-                buffer.indexOf('\ndata:', 5) === -1) ||
-              (buffer.startsWith('data:') &&
-                buffer.indexOf('\ndata:', 5) !== -1)
-            ) {
-              let messageEndIndex;
-              let startIndex = buffer.startsWith('data:')
-                ? 5
-                : nextMessageIndex + 6;
-              let nextDataPrefixIndex = buffer.indexOf('\ndata:', startIndex);
-              if (nextDataPrefixIndex !== -1) {
-                messageEndIndex = nextDataPrefixIndex;
-              } else {
-                messageEndIndex = buffer.length;
-              }
-              const jsonStr = buffer
-                .substring(startIndex, messageEndIndex)
-                .trim();
-              const processedLength =
-                buffer.startsWith('data:') && nextMessageIndex === -1
-                  ? buffer.length
-                  : messageEndIndex;
+            const onData = (chunk: Buffer) => {
+              if (resolved) return;
+              buffer += chunk.toString('utf-8');
+              let nextMessageIndex;
+              // Use the same reliable parsing logic as before for stream chunks
+              while (
+                (nextMessageIndex = buffer.indexOf('\ndata:')) !== -1 ||
+                (buffer.startsWith('data:') &&
+                  buffer.indexOf('\ndata:', 5) === -1) ||
+                (buffer.startsWith('data:') &&
+                  buffer.indexOf('\ndata:', 5) !== -1)
+              ) {
+                let messageEndIndex;
+                let startIndex = buffer.startsWith('data:')
+                  ? 5
+                  : nextMessageIndex + 6;
+                let nextDataPrefixIndex = buffer.indexOf('\ndata:', startIndex);
+                messageEndIndex =
+                  nextDataPrefixIndex !== -1
+                    ? nextDataPrefixIndex
+                    : buffer.length;
 
-              if (!jsonStr) {
-                buffer = buffer.substring(processedLength);
-                continue;
-              }
+                const jsonStr = buffer
+                  .substring(startIndex, messageEndIndex)
+                  .trim();
+                const processedLength = messageEndIndex;
 
-              try {
-                const parsed: RagflowStreamChunk = JSON.parse(jsonStr);
-                if (typeof parsed.data === 'object' && parsed.data.session_id) {
-                  sessionIdFound = parsed.data.session_id;
-                  resolved = true;
-                  firstStream.destroy();
-                  resolve(sessionIdFound);
-                  return;
+                if (!jsonStr) {
+                  buffer = buffer.substring(processedLength);
+                  continue;
                 }
-              } catch (e) {
-                /* Ignore parse errors */
+
+                try {
+                  // Use RagflowStreamChunk and RagflowCompletionData types here
+                  const parsed: RagflowStreamChunk = JSON.parse(jsonStr);
+                  if (
+                    typeof parsed.data === 'object' &&
+                    (parsed.data as RagflowCompletionData).session_id
+                  ) {
+                    sessionIdFound = (parsed.data as RagflowCompletionData)
+                      .session_id;
+                    // Ensure sessionIdFound is not null before resolving
+                    if (sessionIdFound) {
+                      console.log(
+                        '[Stream Extraction] Found session ID:',
+                        sessionIdFound,
+                      );
+                      resolved = true;
+                      firstStream.destroy(); // Destroy stream once ID is found
+                      resolve(sessionIdFound); // Now guaranteed to be string
+                      return;
+                    } else {
+                      // Should not happen if session_id exists, but good practice
+                      console.warn(
+                        '[Stream Extraction] session_id found but was null/empty?',
+                      );
+                    }
+                  }
+                } catch (e) {
+                  /* Ignore parse errors, wait for session ID chunk */
+                }
+                buffer = buffer.substring(processedLength);
+                if (buffer.startsWith('\n')) buffer = buffer.substring(1); // Clean leading newline if any
               }
-              buffer = buffer.substring(processedLength);
-            }
-          };
+            };
 
-          const onEnd = () => {
-            if (!resolved) {
-              resolved = true;
-              firstStream.destroy();
-              reject(new Error('RAGflow stream ended without session ID.'));
-            }
-          };
-          const onError = (err: Error) => {
-            if (!resolved) {
-              resolved = true;
-              firstStream.destroy();
-              reject(err);
-            }
-          };
+            const onEnd = () => {
+              if (!resolved) {
+                resolved = true;
+                firstStream.destroy();
+                reject(new Error('RAGflow stream ended without session ID.'));
+              }
+            };
+            const onError = (err: Error) => {
+              if (!resolved) {
+                resolved = true;
+                firstStream.destroy();
+                reject(err);
+              }
+            };
 
-          firstStream.on('data', onData);
-          firstStream.on('end', onEnd);
-          firstStream.on('error', onError);
+            firstStream.on('data', onData);
+            firstStream.on('end', onEnd);
+            firstStream.on('error', onError);
 
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true;
-              firstStream.destroy();
-              reject(new Error('Timeout waiting for RAGflow session ID'));
-            }
-          }, 30000);
-        } catch (firstCallError) {
-          reject(firstCallError);
-        }
-      });
+            // Safety timeout
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                firstStream.destroy();
+                reject(new Error('Timeout waiting for RAGflow session ID'));
+              }
+            }, 30000);
+          } catch (firstCallError) {
+            console.error(
+              '[Stream Extraction] Error on initial stream call:',
+              firstCallError,
+            );
+            reject(firstCallError); // Reject promise if axios call fails
+          }
+        },
+      ); // End of Promise for session ID extraction
 
-      // Await the session ID extraction and saving
-      const newSessionId = await firstCallPromise;
-      console.log(`Obtained and saved new RAGflow session ID: ${newSessionId}`);
+      // Assign the obtained session ID
+      sessionIdToUse = newSessionId;
+      console.log(`Obtained new RAGflow session ID: ${sessionIdToUse}`);
 
-      // Now make the SECOND call with the new session ID
-      console.log(`Making second call with session ID: ${newSessionId}`);
-      const secondResponse = await axios.post(
+      // Save the new session ID to DB (now we should have a valid ID)
+      await db
+        .update(chats)
+        .set({ ragflowSessionId: sessionIdToUse })
+        .where(eq(chats.id, appChatId))
+        .execute();
+      console.log(`Saved session ID ${sessionIdToUse} for chat ${appChatId}`);
+
+      // --- NOW MAKE THE SECOND CALL (Non-streaming) to get the actual content ---
+      console.log(
+        `Making second call (non-stream) with session ID: ${sessionIdToUse}`,
+      );
+      const secondResponse = await axios.post<RagflowNonStreamResponse>(
         endpoint,
         {
           question: query,
-          stream: true,
-          session_id: newSessionId,
+          stream: false, // Explicitly false for the content call
+          session_id: sessionIdToUse,
         },
         {
           headers: { Authorization: `Bearer ${apiKey}` },
-          responseType: 'stream',
-          timeout: 180000,
+          responseType: 'json',
+          timeout: 180000, // Allow longer timeout for full answer
         },
       );
-      // Process *this* stream for the frontend
-      processRagflowStream(
-        secondResponse.data as Readable,
-        controller, // Pass controller
-        messageId, // Pass messageId
-        appChatId,
-        newSessionId,
+
+      if (secondResponse.data.code !== 0) {
+        throw new Error(
+          `RAGflow API error on second call: ${secondResponse.data.message}`,
+        );
+      }
+      finalAnswer = secondResponse.data.data.answer;
+      finalReferences = secondResponse.data.data.reference;
+    } else {
+      // --- USE EXISTING SESSION (Non-streaming) ---
+      console.log(`Using existing RAGflow session ID: ${sessionIdToUse}`);
+      const response = await axios.post<RagflowNonStreamResponse>(
+        endpoint,
+        {
+          question: query,
+          stream: false, // Set stream to false
+          session_id: sessionIdToUse,
+        },
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          responseType: 'json', // Expect JSON response now
+          timeout: 180000, // Potentially long timeout needed
+        },
       );
+
+      if (response.data.code !== 0) {
+        throw new Error(`RAGflow API error: ${response.data.message}`);
+      }
+
+      // Extract content and references from the single response
+      finalAnswer = response.data.data.answer;
+      finalReferences = response.data.data.reference;
     }
+
+    return {
+      content: finalAnswer,
+      references: finalReferences,
+    };
   } catch (error) {
-    console.error(`Error in getRagflowChatCompletion orchestration:`, error);
+    console.error(`Error in RAGflow non-stream processing:`, error);
     let errorMessage = `Failed to get completion: ${(error as Error).message}`;
     if (axios.isAxiosError(error) && !error.response) {
       errorMessage = `Network error contacting RAGflow: ${error.message}`;
     } else if (axios.isAxiosError(error) && error.response) {
       console.error('RAGflow API Error Response:', error.response?.data);
-      errorMessage = `RAGflow API error: ${error.response?.statusText}`;
+      // Try to parse error details if available in non-streaming error
+      const ragflowErrorMsg =
+        typeof error.response.data === 'object' &&
+        error.response.data !== null &&
+        'message' in error.response.data
+          ? error.response.data.message
+          : error.response?.statusText;
+      errorMessage = `RAGflow API error: ${ragflowErrorMsg}`;
     }
-    // Use controller to signal the error
-    try {
-      controller.enqueue(
-        JSON.stringify({ type: 'error', data: errorMessage }) + '\n',
-      );
-      controller.close();
-    } catch (e) {
-      console.error('Failed to enqueue orchestration error:', e);
-    }
+    // Throw the error to be handled by the API route
+    throw new Error(errorMessage);
   }
 }
 
