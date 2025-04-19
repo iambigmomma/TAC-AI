@@ -1,5 +1,3 @@
-'use client';
-
 import { cn } from '@/lib/utils';
 import {
   BookOpenText,
@@ -10,18 +8,46 @@ import {
   Search,
   Settings,
   Star,
+  User,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
-import React, { useState, type ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
+import { getSession } from '@auth0/nextjs-auth0';
+import UserProfileDropdown from './UserProfileDropdown';
+import { headers } from 'next/headers';
+import { useTranslations } from 'next-intl';
+// Re-comment HistorySection import due to unresolved path
+// import HistorySection from './HistorySection';
 
-const Sidebar = ({ children }: { children: React.ReactNode }) => {
-  const pathname = usePathname();
-  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
+const Sidebar = async ({ children }: { children: React.ReactNode }) => {
+  // Initialize translations for the 'Sidebar' namespace
+  const t = useTranslations('Sidebar');
+
+  const session = await getSession();
+  const user = session?.user;
+
+  // Get pathname from headers inside the component
+  const headersList = await headers();
+  const pathnameHeader =
+    headersList.get('x-next-pathname') || headersList.get('next-url'); // Fallback for different environments
+  const currentPathname = pathnameHeader
+    ? new URL(pathnameHeader, 'http://localhost').pathname
+    : '/'; // Parse URL to get pathname
+
+  // Comment out HistorySection state logic as well if it existed
+  // const isHistoryOpen = true; // Assuming this was related
 
   const getLinkClasses = (href: string, isExact = true) => {
-    const isActive = isExact ? pathname === href : pathname.startsWith(href);
+    // Add safety check: Ensure currentPathname is a string before using string methods
+    const safePathname =
+      typeof currentPathname === 'string' ? currentPathname : '/';
+
+    const isActive = isExact
+      ? safePathname === href // Use safePathname
+      : safePathname.startsWith(href); // Use safePathname
     return cn(
       'group flex items-center rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100',
       isActive
@@ -49,130 +75,45 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
               <li>
                 <Link href="/" className={getLinkClasses('/')}>
                   <Search className="mr-3 h-5 w-5 flex-shrink-0" />
-                  Search
+                  {t('search')}
                   <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                     ⌘K
                   </span>
                 </Link>
               </li>
-              {/* <li>
-                <Link href="/library" className={getLinkClasses('/library', false)}>
-                  <BookOpenText className="mr-3 h-5 w-5 flex-shrink-0" />
-                  知识库
-                </Link>
-              </li> */}
               <li>
                 <Link
                   href="/favorites"
                   className={getLinkClasses('/favorites')}
                 >
                   <Star className="mr-3 h-5 w-5 flex-shrink-0" />
-                  Favorites
+                  {t('favorites')}
                 </Link>
               </li>
-              <li>
-                <div className="space-y-1">
-                  <Link href="/library" passHref legacyBehavior>
-                    <button
-                      onClick={(e) => {
-                        setIsHistoryOpen(!isHistoryOpen);
-                      }}
-                      className={cn(
-                        getLinkClasses('/history', false),
-                        'w-full justify-between flex items-center',
-                      )}
-                    >
-                      <div className="flex items-center">
-                        <History className="mr-3 h-5 w-5 flex-shrink-0" />
-                        History
-                      </div>
-                      {isHistoryOpen ? (
-                        <ChevronUp className="h-5 w-5 flex-shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-5 w-5 flex-shrink-0" />
-                      )}
-                    </button>
+              {user && (
+                <li>
+                  <Link href="/history" className={getLinkClasses('/history')}>
+                    <History className="mr-3 h-5 w-5 flex-shrink-0" />
+                    {t('history')}
                   </Link>
-                  {/* {isHistoryOpen && (
-                    <ul className="ml-4 mt-1 space-y-1 pl-4 border-l border-gray-200 dark:border-gray-700">
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#today', false) + ' text-xs'
-                          }
-                        >
-                          如何看待读书无用论？
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-1', false) + ' text-xs'
-                          }
-                        >
-                          1949年南迁對於故宫的...
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-2', false) + ' text-xs'
-                          }
-                        >
-                          孙中山的情人
-                        </Link>
-                      </li>
-                      <li className="pt-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                        近7天
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-3', false) + ' text-xs'
-                          }
-                        >
-                          请概述「全球人口老龄...
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-4', false) + ' text-xs'
-                          }
-                        >
-                          好看的武侠小说有哪些？
-                        </Link>
-                      </li>
-                    </ul>
-                  )} */}
-                </div>
-              </li>
-
-              <li className="mt-auto pb-4">
-                <Link href="/settings" className={getLinkClasses('/settings')}>
-                  <Settings className="mr-3 h-5 w-5" />
-                  Settings
-                </Link>
-              </li>
-
-              <li className="-mx-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100">
-                  <span className="inline-block h-8 w-8 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                    <svg
-                      className="h-full w-full text-gray-300 dark:text-gray-500"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
+                </li>
+              )}
+              <li className="-mx-4 border-t border-gray-200 dark:border-gray-700 pt-3 mt-auto">
+                {user ? (
+                  <div className="px-1 py-1">
+                    <UserProfileDropdown user={user} />
+                  </div>
+                ) : (
+                  <div className="px-4 py-2">
+                    <a
+                      href="/api/auth/login"
+                      className={getLinkClasses('/api/auth/login', false)}
                     >
-                      <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-                    </svg>
-                  </span>
-                  <span>Jeff Fan</span>
-                </div>
+                      <LogIn className="mr-3 h-5 w-5 flex-shrink-0" />
+                      {t('loginRegister')}
+                    </a>
+                  </div>
+                )}
               </li>
             </ul>
           </nav>

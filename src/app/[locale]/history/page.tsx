@@ -5,37 +5,58 @@ import { cn, formatTimeDifference } from '@/lib/utils';
 import { BookOpenText, ClockIcon, Delete, ScanEye } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-
-export interface Chat {
-  id: string;
-  title: string;
-  createdAt: string;
-  focusMode: string;
-}
+import { Chat } from '@/types';
 
 const Page = () => {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchChats = async () => {
       setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/chats`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
 
-      const res = await fetch(`/api/chats`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const data = await res.json();
-
-      setChats(data.chats);
-      setLoading(false);
+        if (!res.ok) {
+          console.error(`API Error: ${res.status} ${res.statusText}`);
+          setError(`Failed to load chat history (Status: ${res.status})`);
+          setChats([]);
+        } else {
+          const data = await res.json();
+          if (data && Array.isArray(data.chats)) {
+            setChats(data.chats);
+          } else {
+            console.error('Invalid data format received from API:', data);
+            setError('Received invalid data format for chat history.');
+            setChats([]);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching chats:', err);
+        setError('An unexpected error occurred while fetching chat history.');
+        setChats([]);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchChats();
   }, []);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <p className="text-red-500 dark:text-red-400">Error: {error}</p>
+      </div>
+    );
+  }
 
   return loading ? (
     <div className="flex flex-row items-center justify-center min-h-screen">
@@ -61,11 +82,11 @@ const Page = () => {
       <div className="flex flex-col pt-4">
         <div className="flex items-center">
           <BookOpenText />
-          <h1 className="text-3xl font-medium p-2">Library</h1>
+          <h1 className="text-3xl font-medium p-2">History</h1>
         </div>
         <hr className="border-t border-[#2B2C2C] my-4 w-full" />
       </div>
-      {chats.length === 0 && (
+      {chats.length === 0 && !loading && (
         <div className="flex flex-row items-center justify-center min-h-screen">
           <p className="text-black/70 dark:text-white/70 text-sm">
             No chats found.

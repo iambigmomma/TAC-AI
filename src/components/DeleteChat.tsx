@@ -10,7 +10,10 @@ import {
 } from '@headlessui/react';
 import { Fragment, useState } from 'react';
 import { toast } from 'sonner';
-import { Chat } from '@/app/library/page';
+import { Chat } from '@/types';
+import { useRouter, usePathname } from 'next/navigation';
+import { useLocale } from 'next-intl';
+import { routing } from '@/i18n/routing';
 
 const DeleteChat = ({
   chatId,
@@ -25,6 +28,31 @@ const DeleteChat = ({
 }) => {
   const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const router = useRouter();
+  const pathnameWithoutLocale = usePathname();
+  const currentLocale = useLocale();
+
+  const changeLocale = (newLocale: (typeof routing.locales)[number]) => {
+    let newPath;
+
+    const currentPathHasLocale = routing.locales.some((loc) =>
+      pathnameWithoutLocale.startsWith(`/${loc}`),
+    );
+
+    if (newLocale === routing.defaultLocale) {
+      newPath = pathnameWithoutLocale || '/';
+    } else {
+      newPath = `/${newLocale}${pathnameWithoutLocale || ''}`;
+    }
+
+    if (!newPath.startsWith('/')) {
+      newPath = '/' + newPath;
+    }
+
+    console.log(`Switching locale to: ${newLocale}, navigating to: ${newPath}`);
+    router.replace(newPath);
+  };
 
   const handleDelete = async () => {
     setLoading(true);

@@ -1,0 +1,19 @@
+{
+  "Sidebar": {
+    "search": "搜尋",
+    "favorites": "收藏",
+    "history": "歷史紀錄",
+    "loginRegister": "登入 / 註冊"
+  },
+  "UserProfileDropdown": {
+    "toggleToLight": "切換至日間模式",
+    "toggleToDark": "切換至夜間模式",
+    "settings": "設定",
+    "contactUs": "聯繫我們",
+    "logout": "退出登錄"
+  },
+  "HistoryPage": {
+    "title": "歷史紀錄",
+    "noChats": "找不到任何聊天記錄。"
+  }
+}

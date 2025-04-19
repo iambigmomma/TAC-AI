@@ -24,6 +24,7 @@ import {
 } from '@/lib/config';
 import { SearchMode } from '@/components/ChatWindow';
 import { getRagflowChatCompletionNonStream } from '@/lib/ragflow';
+import { getSession } from '@auth0/nextjs-auth0';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,21 +63,37 @@ const handleHistorySave = async (
   focusMode: string,
   files: string[],
 ) => {
+  const session = await getSession();
+  if (!session?.user?.sub) {
+    console.error('Attempted to save history for unauthenticated user.');
+    return;
+  }
+  const userId = session.user.sub;
+
   const chat = await db.query.chats.findFirst({
     where: eq(chats.id, message.chatId),
   });
 
   if (!chat) {
-    await db
-      .insert(chats)
-      .values({
-        id: message.chatId,
-        title: message.content,
-        createdAt: new Date().toString(),
-        focusMode: focusMode,
-        files: files.map(getFileDetails),
-      })
-      .execute();
+    console.log(
+      `Creating new chat entry for chatId: ${message.chatId}, userId: ${userId}`,
+    );
+    try {
+      await db
+        .insert(chats)
+        .values({
+          id: message.chatId,
+          title: message.content,
+          createdAt: new Date().toString(),
+          focusMode: focusMode,
+          files: files.map(getFileDetails),
+          userId: userId,
+        })
+        .execute();
+    } catch (insertError) {
+      console.error('Error inserting new chat:', insertError);
+      throw insertError;
+    }
   }
 
   const messageExists = await db.query.messages.findFirst({

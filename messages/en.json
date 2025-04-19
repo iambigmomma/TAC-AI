@@ -1,0 +1,19 @@
+{
+  "Sidebar": {
+    "search": "Search",
+    "favorites": "Favorites",
+    "history": "History",
+    "loginRegister": "Login / Register"
+  },
+  "UserProfileDropdown": {
+    "toggleToLight": "Switch to Light Mode",
+    "toggleToDark": "Switch to Dark Mode",
+    "settings": "Settings",
+    "contactUs": "Contact Us",
+    "logout": "Logout"
+  },
+  "HistoryPage": {
+    "title": "History",
+    "noChats": "No chats found."
+  }
+}

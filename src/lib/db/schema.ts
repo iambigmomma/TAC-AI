@@ -26,4 +26,5 @@ export const chats = sqliteTable('chats', {
     .$type<File[]>()
     .default(sql`'[]'`),
   ragflowSessionId: text('ragflow_session_id').unique(),
+  userId: text('user_id').notNull(),
 });
