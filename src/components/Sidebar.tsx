@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import { cn, formatTimeDifference } from '@/lib/utils';
 import {
   BookOpenText,
   ChevronDown,
@@ -13,174 +13,291 @@ import {
   LogIn,
   LogOut,
   User as UserIcon,
+  BookText,
+  PanelLeftClose,
+  PanelRightClose,
+  XCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import React, { useState, type ReactNode, Fragment } from 'react';
+import React, { useState, type ReactNode, Fragment, useEffect } from 'react';
 import { useUser } from '@auth0/nextjs-auth0/client';
 import { Menu, Transition } from '@headlessui/react';
+import { type Chat } from '@/app/history/page';
+
+const truncateText = (text: string, maxLength: number) => {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.substring(0, maxLength) + '...';
+};
 
 const Sidebar = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const [isHistoryOpen, setIsHistoryOpen] = useState(true);
-  const { user, error, isLoading } = useUser();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const { user, error: userError, isLoading: userLoading } = useUser();
+  const [chatHistory, setChatHistory] = useState<Chat[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const getLinkClasses = (href: string, isExact = true) => {
+  useEffect(() => {
+    if (user && !userLoading) {
+      const fetchChats = async () => {
+        setHistoryLoading(true);
+        setHistoryError(null);
+        try {
+          const res = await fetch(`/api/chats`);
+          if (!res.ok) {
+            throw new Error('Failed to fetch chat history');
+          }
+          const data = await res.json();
+          const sortedChats = data.chats.sort(
+            (a: Chat, b: Chat) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          );
+          setChatHistory(sortedChats);
+        } catch (err: any) {
+          console.error('History fetch error:', err);
+          setHistoryError(err.message || 'Could not load history.');
+        } finally {
+          setHistoryLoading(false);
+        }
+      };
+      fetchChats();
+    } else if (!userLoading) {
+      setChatHistory([]);
+    }
+  }, [user, userLoading]);
+
+  const getLinkClasses = (
+    href: string,
+    isExact = true,
+    isCollapsed = isSidebarCollapsed,
+  ) => {
     const isActive = isExact ? pathname === href : pathname.startsWith(href);
     return cn(
       'group flex items-center rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100',
       isActive
         ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'
         : 'text-gray-600 dark:text-gray-400',
+      isCollapsed ? 'justify-center' : '',
     );
   };
 
+  const toggleSidebar = () => setIsSidebarCollapsed(!isSidebarCollapsed);
+
   return (
     <div>
-      <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-64 lg:flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-secondary">
+      <div
+        className={cn(
+          'hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-secondary transition-all duration-300 ease-in-out',
+          isSidebarCollapsed ? 'lg:w-20' : 'lg:w-64',
+        )}
+      >
         <div className="flex grow flex-col gap-y-5 overflow-y-auto px-4 py-4">
-          <div className="flex h-16 shrink-0 items-center px-2">
-            <Image
-              src="https://tac-ai-translation.fra1.cdn.digitaloceanspaces.com/udp%20logo.png"
-              alt="Company Logo"
-              width={128}
-              height={32}
-              priority
-            />
+          <div
+            className={cn(
+              'flex h-16 shrink-0 items-center',
+              isSidebarCollapsed ? 'justify-center' : 'justify-between',
+            )}
+          >
+            {!isSidebarCollapsed && (
+              <Image
+                src="https://tac-ai-translation.fra1.cdn.digitaloceanspaces.com/udp%20logo.png"
+                alt="Company Logo"
+                width={128}
+                height={32}
+                priority
+                className="transition-opacity duration-300 ease-in-out"
+              />
+            )}
+            <button
+              onClick={toggleSidebar}
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-1 rounded-md"
+            >
+              {isSidebarCollapsed ? (
+                <PanelRightClose className="h-6 w-6" />
+              ) : (
+                <PanelLeftClose className="h-6 w-6" />
+              )}
+            </button>
           </div>
 
           <nav className="flex flex-1 flex-col">
             <ul role="list" className="flex flex-1 flex-col gap-y-1">
               <li>
                 <Link href="/" className={getLinkClasses('/')}>
-                  <Search className="mr-3 h-5 w-5 flex-shrink-0" />
-                  Search
-                  <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                    ⌘K
-                  </span>
+                  <Search
+                    className={cn(
+                      'h-5 w-5 flex-shrink-0',
+                      !isSidebarCollapsed && 'mr-3',
+                    )}
+                  />
+                  {!isSidebarCollapsed && (
+                    <>
+                      Search
+                      <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        ⌘K
+                      </span>
+                    </>
+                  )}
                 </Link>
               </li>
-              {/* <li>
-                <Link href="/library" className={getLinkClasses('/library', false)}>
-                  <BookOpenText className="mr-3 h-5 w-5 flex-shrink-0" />
-                  知识库
-                </Link>
-              </li> */}
               <li>
                 <Link
                   href="/favorites"
                   className={getLinkClasses('/favorites')}
                 >
-                  <Star className="mr-3 h-5 w-5 flex-shrink-0" />
-                  Favorites
+                  <Star
+                    className={cn(
+                      'h-5 w-5 flex-shrink-0',
+                      !isSidebarCollapsed && 'mr-3',
+                    )}
+                  />
+                  {!isSidebarCollapsed && 'Favorites'}
                 </Link>
               </li>
               <li>
                 <div className="space-y-1">
-                  <Link
-                    href="/library"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setIsHistoryOpen(!isHistoryOpen);
-                    }}
+                  <button
+                    onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+                    disabled={isSidebarCollapsed}
                     className={cn(
                       getLinkClasses('/history', false),
-                      'w-full justify-between flex items-center cursor-pointer',
+                      'w-full flex items-center cursor-pointer',
+                      isSidebarCollapsed ? 'justify-center' : 'justify-between',
+                      isSidebarCollapsed && 'cursor-default',
                     )}
                   >
-                    <div className="flex items-center">
-                      <History className="mr-3 h-5 w-5 flex-shrink-0" />
-                      History
+                    <div
+                      className={cn(
+                        'flex items-center',
+                        isSidebarCollapsed && 'justify-center w-full',
+                      )}
+                    >
+                      <History
+                        className={cn(
+                          'h-5 w-5 flex-shrink-0',
+                          !isSidebarCollapsed && 'mr-3',
+                        )}
+                      />
+                      {!isSidebarCollapsed && 'History'}
                     </div>
-                    {isHistoryOpen ? (
-                      <ChevronUp className="h-5 w-5 flex-shrink-0" />
-                    ) : (
-                      <ChevronDown className="h-5 w-5 flex-shrink-0" />
-                    )}
-                  </Link>
-                  {/* {isHistoryOpen && (
-                    <ul className="ml-4 mt-1 space-y-1 pl-4 border-l border-gray-200 dark:border-gray-700">
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#today', false) + ' text-xs'
-                          }
-                        >
-                          如何看待读书无用论？
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-1', false) + ' text-xs'
-                          }
-                        >
-                          1949年南迁對於故宫的...
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-2', false) + ' text-xs'
-                          }
-                        >
-                          孙中山的情人
-                        </Link>
-                      </li>
-                      <li className="pt-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                        近7天
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-3', false) + ' text-xs'
-                          }
-                        >
-                          请概述「全球人口老龄...
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          href="#"
-                          className={
-                            getLinkClasses('#7days-4', false) + ' text-xs'
-                          }
-                        >
-                          好看的武侠小说有哪些？
-                        </Link>
-                      </li>
+                    {!isSidebarCollapsed &&
+                      (isHistoryOpen ? (
+                        <ChevronUp className="h-5 w-5 flex-shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 flex-shrink-0" />
+                      ))}
+                  </button>
+
+                  {!isSidebarCollapsed && isHistoryOpen && (
+                    <ul className="mt-1 space-y-1 pl-5 border-l border-gray-200 dark:border-gray-700 ml-4 mr-1 max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent">
+                      {historyLoading && (
+                        <li className="px-3 py-1 text-xs text-gray-500 dark:text-gray-400">
+                          Loading history...
+                        </li>
+                      )}
+                      {historyError && (
+                        <li className="px-3 py-1 text-xs text-red-500 dark:text-red-400">
+                          Error: {historyError}
+                        </li>
+                      )}
+                      {!historyLoading &&
+                        !historyError &&
+                        chatHistory.length === 0 &&
+                        user && (
+                          <li className="px-3 py-1 text-xs text-gray-500 dark:text-gray-400">
+                            No history yet.
+                          </li>
+                        )}
+                      {!historyLoading &&
+                        !historyError &&
+                        chatHistory.map((chat) => (
+                          <li key={chat.id}>
+                            <Link
+                              href={`/c/${chat.id}`}
+                              title={chat.title}
+                              className={cn(
+                                getLinkClasses(`/c/${chat.id}`, false, false),
+                                'text-xs block truncate',
+                              )}
+                            >
+                              {truncateText(chat.title, 25)}
+                            </Link>
+                          </li>
+                        ))}
+                      {!user && !userLoading && (
+                        <li className="px-3 py-1 text-xs text-gray-500 dark:text-gray-400">
+                          Login to see history.
+                        </li>
+                      )}
                     </ul>
-                  )} */}
+                  )}
                 </div>
               </li>
 
-              <li className="mt-auto pb-4">
+              <li
+                className={cn(isSidebarCollapsed ? 'mt-auto' : 'mt-auto pb-4')}
+              >
                 <Link href="/settings" className={getLinkClasses('/settings')}>
-                  <Settings className="mr-3 h-5 w-5" />
-                  Settings
+                  <Settings
+                    className={cn(
+                      'h-5 w-5 flex-shrink-0',
+                      !isSidebarCollapsed && 'mr-3',
+                    )}
+                  />
+                  {!isSidebarCollapsed && 'Settings'}
                 </Link>
               </li>
 
-              {/* User Profile / Login Section */}
-              <li className="-mx-4 mt-auto border-t border-gray-200 dark:border-gray-700">
-                {isLoading ? (
-                  <div className="flex items-center justify-center px-4 py-3">
-                    <p className="text-sm text-gray-500">Loading user...</p>
+              <li
+                className={cn(
+                  '-mx-4 border-t border-gray-200 dark:border-gray-700',
+                  isSidebarCollapsed ? 'mt-2' : 'mt-auto',
+                )}
+              >
+                {userLoading ? (
+                  <div
+                    className={cn(
+                      'flex items-center justify-center h-14',
+                      isSidebarCollapsed ? 'px-1' : 'px-4 py-3',
+                    )}
+                  >
+                    {!isSidebarCollapsed && (
+                      <p className="text-sm text-gray-500">Loading...</p>
+                    )}
                   </div>
-                ) : error ? (
-                  <div className="px-4 py-3 text-sm text-red-600">
-                    Error: {error.message}
+                ) : userError ? (
+                  <div
+                    className={cn(
+                      'text-sm text-red-600 flex items-center justify-center h-14',
+                      isSidebarCollapsed ? 'px-1' : 'px-4 py-3',
+                    )}
+                  >
+                    {!isSidebarCollapsed && <p className="truncate">Error</p>}
+                    {isSidebarCollapsed && (
+                      <XCircle className="h-6 w-6 text-red-500" />
+                    )}
                   </div>
                 ) : user ? (
-                  // Logged In: Display User Info and Logout Menu
                   <Menu as="div" className="relative">
-                    <Menu.Button className="flex w-full items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <span className="inline-block h-8 w-8 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                    <Menu.Button
+                      className={cn(
+                        'flex w-full items-center gap-x-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800',
+                        isSidebarCollapsed
+                          ? 'justify-center px-2 py-3 h-14'
+                          : 'px-4 py-3',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'inline-block overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700',
+                          isSidebarCollapsed ? 'h-8 w-8' : 'h-8 w-8',
+                        )}
+                      >
                         {user.picture ? (
                           <Image
                             src={user.picture}
@@ -193,10 +310,13 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
                           <UserIcon className="h-full w-full text-gray-300 dark:text-gray-500 p-1" />
                         )}
                       </span>
-                      <span className="truncate">
-                        {user.name || user.email}
-                      </span>
+                      {!isSidebarCollapsed && (
+                        <span className="truncate">
+                          {user.name || user.email}
+                        </span>
+                      )}
                     </Menu.Button>
+
                     <Transition
                       as={Fragment}
                       enter="transition ease-out duration-100"
@@ -206,7 +326,14 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
                       leaveFrom="transform opacity-100 scale-100"
                       leaveTo="transform opacity-0 scale-95"
                     >
-                      <Menu.Items className="absolute bottom-full left-4 mb-2 w-56 origin-bottom-left rounded-md bg-white dark:bg-gray-800 py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                      <Menu.Items
+                        className={cn(
+                          'absolute left-4 mb-2 w-56 origin-bottom-left rounded-md bg-white dark:bg-gray-800 py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
+                          isSidebarCollapsed
+                            ? 'bottom-full left-full ml-2'
+                            : 'bottom-full left-4',
+                        )}
+                      >
                         <Menu.Item>
                           {({ active }) => (
                             <a
@@ -228,13 +355,22 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
                     </Transition>
                   </Menu>
                 ) : (
-                  // Logged Out: Display Login Link
                   <Link
                     href="/api/auth/login"
-                    className="flex items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    className={cn(
+                      'flex items-center gap-x-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800',
+                      isSidebarCollapsed
+                        ? 'justify-center px-2 py-3 h-14'
+                        : 'px-4 py-3',
+                    )}
                   >
-                    <LogIn className="h-6 w-6 text-gray-400" />
-                    Login / Register
+                    <LogIn
+                      className={cn(
+                        'h-6 w-6',
+                        isSidebarCollapsed ? 'text-gray-400' : 'text-gray-400',
+                      )}
+                    />
+                    {!isSidebarCollapsed && 'Login / Register'}
                   </Link>
                 )}
               </li>
@@ -243,7 +379,12 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
         </div>
       </div>
 
-      <div className="lg:pl-64">
+      <div
+        className={cn(
+          'transition-all duration-300 ease-in-out',
+          isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64',
+        )}
+      >
         <main className="py-10">
           <div className="px-4 sm:px-6 lg:px-8">{children}</div>
         </main>
