@@ -10,7 +10,14 @@ import { Document } from '@langchain/core/documents';
 import { File } from 'lucide-react';
 import { Fragment, useState } from 'react';
 
-const MessageSources = ({ sources }: { sources: Document[] }) => {
+// Define and EXPORT the expected shape of the source metadata object
+export interface SourceMetadata {
+  title: string;
+  url: string;
+  img_src?: string; // Optional image source
+}
+
+const MessageSources = ({ sources }: { sources: SourceMetadata[] }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const closeModal = () => {
@@ -23,27 +30,34 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
     document.body.classList.add('overflow-hidden-scrollable');
   };
 
+  // Ensure sources is an array before mapping
+  if (!Array.isArray(sources)) {
+    console.error('MessageSources received invalid sources prop:', sources);
+    return null; // Or render some fallback UI
+  }
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
       {sources.slice(0, 3).map((source, i) => (
         <a
-          className="bg-light-100 hover:bg-light-200 dark:bg-dark-100 dark:hover:bg-dark-200 transition duration-200 rounded-lg p-3 flex flex-col space-y-2 font-medium"
+          id={`source-item-${i}`}
+          className="bg-light-100 hover:bg-light-200 dark:bg-dark-100 dark:hover:bg-dark-200 transition duration-200 rounded-lg p-3 flex flex-col space-y-2 font-medium scroll-mt-20"
           key={i}
-          href={source.metadata.url}
+          href={source.url}
           target="_blank"
         >
           <p className="dark:text-white text-xs overflow-hidden whitespace-nowrap text-ellipsis">
-            {source.metadata.title}
+            {source.title}
           </p>
           <div className="flex flex-row items-center justify-between">
             <div className="flex flex-row items-center space-x-1">
-              {source.metadata.url === 'File' ? (
+              {source.url === '#' || source.url === 'File' ? (
                 <div className="bg-dark-200 hover:bg-dark-100 transition duration-200 flex items-center justify-center w-6 h-6 rounded-full">
                   <File size={12} className="text-white/70" />
                 </div>
               ) : (
                 <img
-                  src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.metadata.url}`}
+                  src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`}
                   width={16}
                   height={16}
                   alt="favicon"
@@ -51,7 +65,9 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
                 />
               )}
               <p className="text-xs text-black/50 dark:text-white/50 overflow-hidden whitespace-nowrap text-ellipsis">
-                {source.metadata.url.replace(/.+\/\/|www.|\..+/g, '')}
+                {source.url === '#'
+                  ? 'Unknown Source'
+                  : source.url.replace(/.+\/\/|www.|\..+/g, '')}
               </p>
             </div>
             <div className="flex flex-row items-center space-x-1 text-black/50 dark:text-white/50 text-xs">
@@ -68,7 +84,7 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
         >
           <div className="flex flex-row items-center space-x-1">
             {sources.slice(3, 6).map((source, i) => {
-              return source.metadata.url === 'File' ? (
+              return source.url === '#' || source.url === 'File' ? (
                 <div
                   key={i}
                   className="bg-dark-200 hover:bg-dark-100 transition duration-200 flex items-center justify-center w-6 h-6 rounded-full"
@@ -78,7 +94,7 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
               ) : (
                 <img
                   key={i}
-                  src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.metadata.url}`}
+                  src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`}
                   width={16}
                   height={16}
                   alt="favicon"
@@ -112,23 +128,24 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
                   <div className="grid grid-cols-2 gap-2 overflow-auto max-h-[300px] mt-2 pr-2">
                     {sources.map((source, i) => (
                       <a
+                        id={`source-item-dialog-${i}`}
                         className="bg-light-secondary hover:bg-light-200 dark:bg-dark-secondary dark:hover:bg-dark-200 border border-light-200 dark:border-dark-200 transition duration-200 rounded-lg p-3 flex flex-col space-y-2 font-medium"
                         key={i}
-                        href={source.metadata.url}
+                        href={source.url}
                         target="_blank"
                       >
                         <p className="dark:text-white text-xs overflow-hidden whitespace-nowrap text-ellipsis">
-                          {source.metadata.title}
+                          {source.title}
                         </p>
                         <div className="flex flex-row items-center justify-between">
                           <div className="flex flex-row items-center space-x-1">
-                            {source.metadata.url === 'File' ? (
+                            {source.url === '#' || source.url === 'File' ? (
                               <div className="bg-dark-200 hover:bg-dark-100 transition duration-200 flex items-center justify-center w-6 h-6 rounded-full">
                                 <File size={12} className="text-white/70" />
                               </div>
                             ) : (
                               <img
-                                src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.metadata.url}`}
+                                src={`https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`}
                                 width={16}
                                 height={16}
                                 alt="favicon"
@@ -136,10 +153,9 @@ const MessageSources = ({ sources }: { sources: Document[] }) => {
                               />
                             )}
                             <p className="text-xs text-black/50 dark:text-white/50 overflow-hidden whitespace-nowrap text-ellipsis">
-                              {source.metadata.url.replace(
-                                /.+\/\/|www.|\..+/g,
-                                '',
-                              )}
+                              {source.url === '#'
+                                ? 'Unknown Source'
+                                : source.url.replace(/.+\/\/|www.|\..+/g, '')}
                             </p>
                           </div>
                           <div className="flex flex-row items-center space-x-1 text-black/50 dark:text-white/50 text-xs">

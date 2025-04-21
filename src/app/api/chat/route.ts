@@ -287,25 +287,13 @@ export const POST = async (req: Request) => {
         let recievedMessage = '';
         let sources: any[] = [];
         emitter.on('data', (data) => {
-          // Log the raw data received from the internal emitter
-          console.log(
-            '[API /chat] handleNonRagflowStream: Raw data received:',
-            data,
-          );
-
-          // Basic check if data looks like a stringified JSON object before parsing
           if (
             typeof data === 'string' &&
             data.startsWith('{') &&
             data.endsWith('}')
           ) {
             try {
-              const parsedData = JSON.parse(data); // Parses the JSON sent by handleStream
-              console.log(
-                '[API /chat] handleNonRagflowStream: Parsed internal data:',
-                parsedData,
-              );
-
+              const parsedData = JSON.parse(data);
               if (parsedData.type === 'response') {
                 recievedMessage += parsedData.data;
                 const messageToSend = JSON.stringify({
@@ -321,36 +309,25 @@ export const POST = async (req: Request) => {
                   data: parsedData.data,
                   messageId: msgId,
                 });
-                console.log(
-                  '[API /chat] handleNonRagflowStream: Writing sources to response stream:',
-                  sourcesToSend,
-                );
+                // console.log(
+                //   '[API /chat] handleNonRagflowStream: Writing sources to response stream:',
+                //   sourcesToSend,
+                // );
                 streamWriter.write(textEncoder.encode(sourcesToSend + '\n'));
               }
-              // Add handling for other expected types if necessary
             } catch (parseError) {
               console.error(
                 '[API /chat] handleNonRagflowStream: Failed to parse internal JSON data:',
                 data,
                 parseError,
               );
-              // Log the specific error message along with the data
               console.error(
                 `[API /chat] handleNonRagflowStream: Parse Error -> ${(parseError as Error).message}`,
               );
-              // Decide how to handle parse errors - maybe send an error chunk to frontend?
             }
-          } else {
-            // Log unexpected data format
-            console.warn(
-              '[API /chat] handleNonRagflowStream: Received unexpected data format from internal emitter:',
-              data,
-            );
-            // Avoid writing potentially corrupt data to the main stream
           }
         });
         emitter.on('end', () => {
-          console.log('[API /chat] Stream emitter: end received');
           streamWriter.write(
             textEncoder.encode(
               JSON.stringify({
@@ -398,9 +375,6 @@ export const POST = async (req: Request) => {
         chatId,
       );
 
-      console.log(
-        `Executing Web/Both search (mode: ${searchMode}, focus: ${focusMode})...`,
-      );
       const selectedPrompts = getPromptsForFocus(focusMode);
       const agentConfig = {
         searchWeb: true,
@@ -411,13 +385,6 @@ export const POST = async (req: Request) => {
         responsePrompt: selectedPrompts.responsePrompt,
         activeEngines: ['google'],
       };
-      console.log(
-        '[API /chat] Preparing MetaSearchAgent (LLM: ' +
-          llm?.constructor?.name +
-          ', Embedding: ' +
-          embedding?.constructor?.name +
-          ')',
-      );
       const agent = new MetaSearchAgent(agentConfig);
       const historyMessages: BaseMessage[] = body.history.map((msg) => {
         if (msg[0] === 'human') return new HumanMessage(msg[1]);
@@ -426,7 +393,6 @@ export const POST = async (req: Request) => {
       const systemInstructions = body.systemInstructions || '';
 
       try {
-        console.log('[API /chat] Calling agent.searchAndAnswer...');
         const agentEmitter = await agent.searchAndAnswer(
           message.content,
           historyMessages,
@@ -436,19 +402,11 @@ export const POST = async (req: Request) => {
           body.files,
           systemInstructions,
         );
-        console.log(
-          '[API /chat] agent.searchAndAnswer call finished, attaching listeners.',
-        );
 
         agentEmitter.on('data', (data) => {
-          console.log(
-            '[API /chat] Agent emitter: data received',
-            data.substring(0, 100),
-          );
           searchEmitter.emit('data', data);
         });
         agentEmitter.on('end', () => {
-          console.log('[API /chat] Agent emitter: end received');
           searchEmitter.emit('end');
         });
         agentEmitter.on('error', (error) => {

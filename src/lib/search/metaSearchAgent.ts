@@ -483,12 +483,12 @@ class MetaSearchAgent implements MetaSearchAgentType {
         }
 
         if (finalDocs && finalDocs.length > 0) {
-          const sourceMetadata = finalDocs.map((doc) => ({
-            title: doc.metadata.title,
-            url: doc.metadata.url,
-            ...(doc.metadata.img_src && { img_src: doc.metadata.img_src }),
+          const sourceMetadata = finalDocs.map((doc, index) => ({
+            title: doc.metadata?.title || `Source ${index + 1}`,
+            url: doc.metadata?.url || '#',
+            ...(doc.metadata?.img_src && { img_src: doc.metadata.img_src }),
           }));
-          console.log('[MetaSearchAgent] process: Emitting sources metadata.');
+          // console.log('[MetaSearchAgent] process: Emitting sources metadata.');
           emitter.emit(
             'data',
             JSON.stringify({

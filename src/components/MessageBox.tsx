@@ -22,7 +22,7 @@ import {
 import Markdown, { MarkdownToJSX } from 'markdown-to-jsx';
 import Copy from './MessageActions/Copy';
 import Rewrite from './MessageActions/Rewrite';
-import MessageSources from './MessageSources';
+import MessageSources, { type SourceMetadata } from './MessageSources';
 import SearchImages from './SearchImages';
 import SearchVideos from './SearchVideos';
 import { useSpeech } from 'react-text-to-speech';
@@ -44,6 +44,44 @@ const ThinkTagProcessor = ({ children }: { children: React.ReactNode }) => {
   return <ThinkBox content={children as string} />;
 };
 
+const ClickableCitation = ({ number }: { number: string }) => {
+  const num = parseInt(number);
+  if (isNaN(num) || num <= 0) {
+    return <span>[{number}]</span>; // Render as text if invalid
+  }
+  const targetId = `source-item-${num - 1}`; // ID corresponds to MessageSources item
+
+  // Function to handle smooth scroll
+  const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Optional: Add a temporary highlight effect
+      element.classList.add('ring-2', 'ring-blue-500');
+      setTimeout(() => {
+        element.classList.remove('ring-2', 'ring-blue-500');
+      }, 1500); // Remove highlight after 1.5 seconds
+    } else {
+      // Log if the element wasn't found
+      console.warn(
+        `[ClickableCitation] Element with ID "${targetId}" not found.`,
+      );
+    }
+  };
+
+  return (
+    <a
+      href={`#${targetId}`}
+      onClick={handleClick}
+      className="inline-block align-baseline bg-light-secondary dark:bg-dark-secondary text-blue-600 dark:text-blue-400 rounded px-1 py-0 mx-0.5 text-xs font-medium no-underline hover:underline focus:outline-none focus:ring-1 focus:ring-blue-500"
+      title={`Scroll to source ${num}`}
+    >
+      {num}
+    </a>
+  );
+};
+
 const MessageBox = ({
   message,
   messageIndex,
@@ -63,8 +101,9 @@ const MessageBox = ({
   rewrite: (messageId: string) => void;
   sendMessage: (message: string) => void;
 }) => {
-  const [parsedMessage, setParsedMessage] = useState(message.content);
-  const [speechMessage, setSpeechMessage] = useState(message.content);
+  const [speechMessage, setSpeechMessage] = useState(() =>
+    message.content.replace(/\\[\\d+\\]/g, ''),
+  );
 
   // --- State for Loading Animation Text ---
   const loadingMessages = [
@@ -103,62 +142,8 @@ const MessageBox = ({
   // --- End Loading Animation Text State ---
 
   useEffect(() => {
-    const citationRegex = /\[([^\]]+)\]/g;
-    const regex = /\[(\d+)\]/g;
-    let processedMessage = message.content;
-
-    if (message.role === 'assistant' && message.content.includes('<think>')) {
-      const openThinkTag = processedMessage.match(/<think>/g)?.length || 0;
-      const closeThinkTag = processedMessage.match(/<\/think>/g)?.length || 0;
-
-      if (openThinkTag > closeThinkTag) {
-        processedMessage += '</think> <a> </a>'; // The extra <a> </a> is to prevent the the think component from looking bad
-      }
-    }
-
-    if (
-      message.role === 'assistant' &&
-      message?.sources &&
-      message.sources.length > 0
-    ) {
-      setParsedMessage(
-        processedMessage.replace(
-          citationRegex,
-          (_, capturedContent: string) => {
-            const numbers = capturedContent
-              .split(',')
-              .map((numStr) => numStr.trim());
-
-            const linksHtml = numbers
-              .map((numStr) => {
-                const number = parseInt(numStr);
-
-                if (isNaN(number) || number <= 0) {
-                  return `[${numStr}]`;
-                }
-
-                const source = message.sources?.[number - 1];
-                const url = source?.metadata?.url;
-
-                if (url) {
-                  return `<a href="${url}" target="_blank" className="bg-light-secondary dark:bg-dark-secondary px-1 rounded ml-1 no-underline text-xs text-black/70 dark:text-white/70 relative">${numStr}</a>`;
-                } else {
-                  return `[${numStr}]`;
-                }
-              })
-              .join('');
-
-            return linksHtml;
-          },
-        ),
-      );
-      setSpeechMessage(message.content.replace(regex, ''));
-      return;
-    }
-
-    setSpeechMessage(message.content.replace(regex, ''));
-    setParsedMessage(processedMessage);
-  }, [message.content, message.sources, message.role]);
+    setSpeechMessage(message.content.replace(/\\[\\d+\\]/g, ''));
+  }, [message.content]);
 
   const { speechStatus, start, stop } = useSpeech({ text: speechMessage });
 
@@ -233,37 +218,115 @@ const MessageBox = ({
   };
 
   // Update Markdown overrides to use the new CitationRenderer
-  const markdownOverrides: MarkdownToJSX.Options = {
-    overrides: {
-      think: {
-        component: ThinkTagProcessor,
+  const markdownOverrides: MarkdownToJSX.Options = useMemo(
+    () => ({
+      overrides: {
+        think: {
+          component: ThinkTagProcessor,
+        },
+        // Override for the custom <citation> tag we'll insert
+        citation: {
+          component: ClickableCitation,
+        },
+        // RAGFlow citation override (keep existing logic)
+        'citation-placeholder': {
+          component: CitationRenderer,
+          props: {
+            references: message.references,
+          },
+        },
       },
-      // Add override for our custom placeholder tag
-      'citation-placeholder': {
-        component: CitationRenderer,
-        // props are automatically passed, including 'marker' if set as attribute
-      },
-    },
-  };
+    }),
+    [message.references],
+  ); // Dependencies might be needed if CitationRenderer relies on props/state
 
-  // Prepare content string with placeholders if references exist
-  const contentWithPlaceholders = useMemo(() => {
-    if (!message.references) {
-      return message.content;
+  // Prepare content string with <citation> tags
+  const contentWithCitationTags = useMemo(() => {
+    // Start with original content as default
+    let processed = message.content || ''; // Ensure processed is always a string
+
+    try {
+      const citationRegex = new RegExp('\\[(\\d+)\\]', 'g');
+      processed = processed.replace(citationRegex, (match, number) => {
+        const num = parseInt(number); // parseInt takes only one argument
+        if (isNaN(num) || num <= 0) {
+          console.warn(`[MessageBox] Invalid citation number found: ${number}`);
+          return match; // Return original if invalid
+        }
+        if (message.sources && num <= message.sources.length) {
+          return `<citation number="${number}"></citation>`;
+        } else {
+          // Optionally log if source index is out of bounds
+          // console.warn(`[MessageBox] Citation [${num}] out of bounds for sources length ${message.sources?.length}`);
+          return match; // Return original if source doesn't exist for the number
+        }
+      });
+    } catch (e) {
+      console.error(
+        '[MessageBox] Error during standard citation replacement:',
+        e,
+      );
+      // On error, processed keeps its current value (potentially original or partially processed)
     }
-    // Replace ##N$$ with <citation-placeholder marker="##N$$"></citation-placeholder>
-    return message.content.replace(/(##\d+\$\$)/g, (match) => {
-      // Ensure the marker attribute value is properly quoted
-      return `<citation-placeholder marker="${match}"></citation-placeholder>`;
-    });
-  }, [message.content, message.references]);
+
+    // Handle RAGflow placeholders AFTER standard replacement
+    if (message.references) {
+      try {
+        const ragflowRegex = new RegExp('(##\\d+\\$$)', 'g');
+        processed = processed.replace(ragflowRegex, (match) => {
+          return `<citation-placeholder marker="${match}"></citation-placeholder>`;
+        });
+      } catch (e) {
+        console.error(
+          '[MessageBox] Error during RAGflow citation replacement:',
+          e,
+        );
+        // On error, processed keeps its current value
+      }
+    }
+
+    // Handle <think> tags (ensure they remain)
+    if (processed.includes('<think>')) {
+      const openThinkTag = processed.match(/<think>/g)?.length || 0;
+      const closeThinkTag = processed.match(/<\/think>/g)?.length || 0;
+      if (openThinkTag > closeThinkTag) {
+        processed += '</think> <a> </a>';
+      }
+    }
+    // Ensure a string is always returned
+    // --- Add final cleanup step ---
+    // Remove lines starting with "Source:" or "Soorce:" etc., often appearing at the end
+    processed = processed
+      .replace(/\n[\s]*(So?urce:|Sourcee:|Reference:)[^\n]+/g, (match) => {
+        // Only remove if it looks like a source list item (contains [digit] or http)
+        if (
+          match.includes('[') ||
+          match.includes(']') ||
+          match.includes('http')
+        ) {
+          return ''; // Remove the line
+        }
+        return match; // Keep the line if it doesn't look like a source item
+      })
+      .trim(); // Trim whitespace from the final result
+    // --- End cleanup step ---
+    return processed;
+  }, [message.content, message.references, message.sources]);
+
+  // --- Log the processed content to check tags ---
+  useEffect(() => {
+    console.log(
+      '[MessageBox] Content with citation tags:',
+      contentWithCitationTags,
+    );
+  }, [contentWithCitationTags]);
 
   // --- Typewriter Logic ---
   // Only apply typewriter effect to the last assistant message when not loading
   const isTyping = !loading && isLast && message.role === 'assistant';
   // Pass the FINAL prepared content to the typewriter
   const typedContent = useTypewriter(
-    isTyping ? contentWithPlaceholders : '',
+    isTyping ? contentWithCitationTags || '' : '',
     1,
   );
 
@@ -288,7 +351,6 @@ const MessageBox = ({
           </h2>
         </div>
       )}
-
       {message.role === 'assistant' &&
         (loading && isLast ? (
           <div className="flex flex-col space-y-2 items-start w-full lg:w-9/12 mt-4 mb-6">
@@ -309,20 +371,6 @@ const MessageBox = ({
               ref={dividerRef}
               className="flex flex-col space-y-6 w-full lg:w-9/12"
             >
-              {message.sources && message.sources.length > 0 && (
-                <div className="flex flex-col space-y-2">
-                  <div className="flex flex-row items-center space-x-2">
-                    <BookCopy
-                      className="text-black dark:text-white"
-                      size={20}
-                    />
-                    <h3 className="text-black dark:text-white font-medium text-xl">
-                      Sources
-                    </h3>
-                  </div>
-                  <MessageSources sources={message.sources} />
-                </div>
-              )}
               <div className="flex flex-col space-y-2">
                 <div className="flex flex-row items-center space-x-2">
                   <Disc3
@@ -339,13 +387,15 @@ const MessageBox = ({
 
                 <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
                   <Markdown options={markdownOverrides}>
-                    {isTyping ? typedContent : contentWithPlaceholders}
+                    {isTyping
+                      ? typedContent || ''
+                      : contentWithCitationTags || ''}
                   </Markdown>
 
                   {hasReferences &&
                     (!isTyping ||
                       typedContent.length ===
-                        contentWithPlaceholders.length) && (
+                        contentWithCitationTags.length) && (
                       <div className="mt-6 border-t pt-4 border-gray-200 dark:border-gray-700 not-prose">
                         <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">
                           Referenced Documents:
@@ -356,7 +406,7 @@ const MessageBox = ({
                               <li
                                 key={index}
                                 className="truncate"
-                                title={agg.doc_name}
+                                title={agg.doc_name || 'Unknown Document'}
                               >
                                 {agg.doc_name || 'Unknown Document'}
                               </li>
@@ -370,7 +420,7 @@ const MessageBox = ({
                   ? null
                   : (!isTyping ||
                       typedContent.length ===
-                        contentWithPlaceholders.length) && (
+                        contentWithCitationTags.length) && (
                       <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
                         <div className="flex flex-row items-center space-x-1">
                           <Rewrite
@@ -408,7 +458,7 @@ const MessageBox = ({
                   message.role === 'assistant' &&
                   !loading &&
                   (!isTyping ||
-                    typedContent.length === contentWithPlaceholders.length) && (
+                    typedContent.length === contentWithCitationTags.length) && (
                     <>
                       <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
                       <div className="flex flex-col space-y-3 text-black dark:text-white">
@@ -450,15 +500,35 @@ const MessageBox = ({
                 query={history[messageIndex - 1].content}
                 chatHistory={history.slice(0, messageIndex - 1)}
                 messageId={message.messageId}
+                loading={loading}
+                isAssistantMessageLoaded={!loading && isLast}
               />
               <SearchVideos
                 chatHistory={history.slice(0, messageIndex - 1)}
                 query={history[messageIndex - 1].content}
                 messageId={message.messageId}
+                loading={loading}
+                isAssistantMessageLoaded={!loading && isLast}
               />
             </div>
           </div>
         ))}
+      {/* Sources section moved here - Use ternary operator for cleaner conditional rendering */}
+      {message.role === 'assistant' &&
+      !loading &&
+      message.sources &&
+      message.sources.length > 0 ? (
+        <div className="flex flex-col space-y-2 mt-6 lg:w-9/12">
+          <div className="flex flex-row items-center space-x-2">
+            <BookCopy className="text-black dark:text-white" size={20} />
+            <h3 className="text-black dark:text-white font-medium text-xl">
+              Sources
+            </h3>
+          </div>
+          <MessageSources sources={message.sources} />
+        </div>
+      ) : null}{' '}
+      {/* Return null if condition is false */}
     </div>
   );
 };

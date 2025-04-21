@@ -13,6 +13,7 @@ import { Settings, Loader2, Send, Share2, Sparkles, Menu } from 'lucide-react';
 import Link from 'next/link';
 import NextError from 'next/error';
 import { type RagflowReference } from '@/lib/types';
+import { type SourceMetadata } from './MessageSources';
 // import { MessageSuggestions } from './MessageSuggestions'; // Temporarily commented out
 import { v4 as uuidv4 } from 'uuid';
 
@@ -23,7 +24,7 @@ export type Message = {
   content: string;
   role: 'user' | 'assistant';
   suggestions?: string[];
-  sources?: Document[];
+  sources?: SourceMetadata[];
   references?: RagflowReference;
 };
 
@@ -444,7 +445,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
         const decoder = new TextDecoder();
         let partialChunk = ''; // Buffer for incomplete JSON lines
         let accumulatedContent = ''; // Accumulator for the final answer string
-        let currentSources: Document[] | undefined = undefined;
+        let currentSources: SourceMetadata[] | undefined = undefined;
 
         const messageHandler = (data: any) => {
           if (data.type === 'message') {
@@ -457,7 +458,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
               ),
             );
           } else if (data.type === 'sources') {
-            currentSources = data.data;
+            currentSources = data.data as SourceMetadata[];
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.messageId === assistantMessageId
@@ -477,7 +478,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
                   ? {
                       ...msg,
                       content: accumulatedContent,
-                      sources: currentSources,
+                      sources: currentSources as SourceMetadata[] | undefined,
                     }
                   : msg,
               ),
