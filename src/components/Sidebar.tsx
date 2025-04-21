@@ -10,15 +10,21 @@ import {
   Search,
   Settings,
   Star,
+  LogIn,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import React, { useState, type ReactNode } from 'react';
+import React, { useState, type ReactNode, Fragment } from 'react';
+import { useUser } from '@auth0/nextjs-auth0/client';
+import { Menu, Transition } from '@headlessui/react';
 
 const Sidebar = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const [isHistoryOpen, setIsHistoryOpen] = useState(true);
+  const { user, error, isLoading } = useUser();
 
   const getLinkClasses = (href: string, isExact = true) => {
     const isActive = isExact ? pathname === href : pathname.startsWith(href);
@@ -72,26 +78,26 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
               </li>
               <li>
                 <div className="space-y-1">
-                  <Link href="/library" passHref legacyBehavior>
-                    <button
-                      onClick={(e) => {
-                        setIsHistoryOpen(!isHistoryOpen);
-                      }}
-                      className={cn(
-                        getLinkClasses('/history', false),
-                        'w-full justify-between flex items-center',
-                      )}
-                    >
-                      <div className="flex items-center">
-                        <History className="mr-3 h-5 w-5 flex-shrink-0" />
-                        History
-                      </div>
-                      {isHistoryOpen ? (
-                        <ChevronUp className="h-5 w-5 flex-shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-5 w-5 flex-shrink-0" />
-                      )}
-                    </button>
+                  <Link
+                    href="/library"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setIsHistoryOpen(!isHistoryOpen);
+                    }}
+                    className={cn(
+                      getLinkClasses('/history', false),
+                      'w-full justify-between flex items-center cursor-pointer',
+                    )}
+                  >
+                    <div className="flex items-center">
+                      <History className="mr-3 h-5 w-5 flex-shrink-0" />
+                      History
+                    </div>
+                    {isHistoryOpen ? (
+                      <ChevronUp className="h-5 w-5 flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 flex-shrink-0" />
+                    )}
                   </Link>
                   {/* {isHistoryOpen && (
                     <ul className="ml-4 mt-1 space-y-1 pl-4 border-l border-gray-200 dark:border-gray-700">
@@ -160,19 +166,77 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
                 </Link>
               </li>
 
-              <li className="-mx-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100">
-                  <span className="inline-block h-8 w-8 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                    <svg
-                      className="h-full w-full text-gray-300 dark:text-gray-500"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
+              {/* User Profile / Login Section */}
+              <li className="-mx-4 mt-auto border-t border-gray-200 dark:border-gray-700">
+                {isLoading ? (
+                  <div className="flex items-center justify-center px-4 py-3">
+                    <p className="text-sm text-gray-500">Loading user...</p>
+                  </div>
+                ) : error ? (
+                  <div className="px-4 py-3 text-sm text-red-600">
+                    Error: {error.message}
+                  </div>
+                ) : user ? (
+                  // Logged In: Display User Info and Logout Menu
+                  <Menu as="div" className="relative">
+                    <Menu.Button className="flex w-full items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <span className="inline-block h-8 w-8 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                        {user.picture ? (
+                          <Image
+                            src={user.picture}
+                            alt={user.name || 'User Avatar'}
+                            width={32}
+                            height={32}
+                            className="h-full w-full"
+                          />
+                        ) : (
+                          <UserIcon className="h-full w-full text-gray-300 dark:text-gray-500 p-1" />
+                        )}
+                      </span>
+                      <span className="truncate">
+                        {user.name || user.email}
+                      </span>
+                    </Menu.Button>
+                    <Transition
+                      as={Fragment}
+                      enter="transition ease-out duration-100"
+                      enterFrom="transform opacity-0 scale-95"
+                      enterTo="transform opacity-100 scale-100"
+                      leave="transition ease-in duration-75"
+                      leaveFrom="transform opacity-100 scale-100"
+                      leaveTo="transform opacity-0 scale-95"
                     >
-                      <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-                    </svg>
-                  </span>
-                  <span>Jeff Fan</span>
-                </div>
+                      <Menu.Items className="absolute bottom-full left-4 mb-2 w-56 origin-bottom-left rounded-md bg-white dark:bg-gray-800 py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                        <Menu.Item>
+                          {({ active }) => (
+                            <a
+                              href="/api/auth/logout"
+                              className={cn(
+                                active ? 'bg-red-100 dark:bg-red-700' : '',
+                                'flex items-center w-full px-4 py-2 text-sm text-red-700 dark:text-red-300',
+                              )}
+                            >
+                              <LogOut
+                                className="mr-2 h-4 w-4"
+                                aria-hidden="true"
+                              />
+                              Logout
+                            </a>
+                          )}
+                        </Menu.Item>
+                      </Menu.Items>
+                    </Transition>
+                  </Menu>
+                ) : (
+                  // Logged Out: Display Login Link
+                  <Link
+                    href="/api/auth/login"
+                    className="flex items-center gap-x-3 px-4 py-3 text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    <LogIn className="h-6 w-6 text-gray-400" />
+                    Login / Register
+                  </Link>
+                )}
               </li>
             </ul>
           </nav>
