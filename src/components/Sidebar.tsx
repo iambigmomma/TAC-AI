@@ -88,6 +88,24 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
 
   const toggleSidebar = () => setIsSidebarCollapsed(!isSidebarCollapsed);
 
+  // Main navigation items
+  const navigation = [
+    { name: 'Search', href: '/', icon: Search, shortcut: '⌘K' },
+    { name: 'Favorites', href: '/favorites', icon: Star },
+    // History is handled separately due to dropdown
+  ];
+
+  // User navigation items (for the popup menu)
+  const userNavigation = [
+    { name: 'Settings', href: '/settings', icon: Settings },
+    {
+      name: 'Logout',
+      href: '/api/auth/logout',
+      icon: LogOut,
+      isDestructive: true,
+    },
+  ];
+
   return (
     <div>
       <div
@@ -104,14 +122,16 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
             )}
           >
             {!isSidebarCollapsed && (
-              <Image
-                src="https://tac-ai-translation.fra1.cdn.digitaloceanspaces.com/udp%20logo.png"
-                alt="Company Logo"
-                width={128}
-                height={32}
-                priority
-                className="transition-opacity duration-300 ease-in-out"
-              />
+              <Link href="/" className="block flex-shrink-0">
+                <Image
+                  src="https://tac-ai-translation.fra1.cdn.digitaloceanspaces.com/udp%20logo.png"
+                  alt="Company Logo"
+                  width={128}
+                  height={32}
+                  priority
+                  className="transition-opacity duration-300 ease-in-out"
+                />
+              </Link>
             )}
             <button
               onClick={toggleSidebar}
@@ -127,38 +147,33 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
 
           <nav className="flex flex-1 flex-col">
             <ul role="list" className="flex flex-1 flex-col gap-y-1">
-              <li>
-                <Link href="/" className={getLinkClasses('/')}>
-                  <Search
-                    className={cn(
-                      'h-5 w-5 flex-shrink-0',
-                      !isSidebarCollapsed && 'mr-3',
+              {navigation.map((item) => (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={getLinkClasses(item.href, item.href === '/')}
+                    prefetch={false}
+                  >
+                    <item.icon
+                      className={cn(
+                        'h-5 w-5 flex-shrink-0',
+                        !isSidebarCollapsed && 'mr-3',
+                      )}
+                    />
+                    {!isSidebarCollapsed && (
+                      <>
+                        {item.name}
+                        {item.shortcut && (
+                          <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                            {item.shortcut}
+                          </span>
+                        )}
+                      </>
                     )}
-                  />
-                  {!isSidebarCollapsed && (
-                    <>
-                      Search
-                      <span className="ml-auto inline-block whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                        ⌘K
-                      </span>
-                    </>
-                  )}
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/favorites"
-                  className={getLinkClasses('/favorites')}
-                >
-                  <Star
-                    className={cn(
-                      'h-5 w-5 flex-shrink-0',
-                      !isSidebarCollapsed && 'mr-3',
-                    )}
-                  />
-                  {!isSidebarCollapsed && 'Favorites'}
-                </Link>
-              </li>
+                  </Link>
+                </li>
+              ))}
+
               <li>
                 <div className="space-y-1">
                   <button
@@ -240,23 +255,9 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
               </li>
 
               <li
-                className={cn(isSidebarCollapsed ? 'mt-auto' : 'mt-auto pb-4')}
-              >
-                <Link href="/settings" className={getLinkClasses('/settings')}>
-                  <Settings
-                    className={cn(
-                      'h-5 w-5 flex-shrink-0',
-                      !isSidebarCollapsed && 'mr-3',
-                    )}
-                  />
-                  {!isSidebarCollapsed && 'Settings'}
-                </Link>
-              </li>
-
-              <li
                 className={cn(
                   '-mx-4 border-t border-gray-200 dark:border-gray-700',
-                  isSidebarCollapsed ? 'mt-2' : 'mt-auto',
+                  isSidebarCollapsed ? 'mt-auto' : 'mt-auto',
                 )}
               >
                 {userLoading ? (
@@ -334,23 +335,32 @@ const Sidebar = ({ children }: { children: React.ReactNode }) => {
                             : 'bottom-full left-4',
                         )}
                       >
-                        <Menu.Item>
-                          {({ active }) => (
-                            <a
-                              href="/api/auth/logout"
-                              className={cn(
-                                active ? 'bg-red-100 dark:bg-red-700' : '',
-                                'flex items-center w-full px-4 py-2 text-sm text-red-700 dark:text-red-300',
-                              )}
-                            >
-                              <LogOut
-                                className="mr-2 h-4 w-4"
-                                aria-hidden="true"
-                              />
-                              Logout
-                            </a>
-                          )}
-                        </Menu.Item>
+                        {userNavigation.map((item) => (
+                          <Menu.Item key={item.name}>
+                            {({ active }) => (
+                              <Link
+                                href={item.href}
+                                className={cn(
+                                  active ? 'bg-gray-100 dark:bg-gray-700' : '',
+                                  item.isDestructive
+                                    ? 'text-red-700 dark:text-red-300'
+                                    : 'text-gray-700 dark:text-gray-200',
+                                  'flex items-center w-full px-4 py-2 text-sm font-medium',
+                                )}
+                              >
+                                <item.icon
+                                  className={cn(
+                                    'mr-2 h-4 w-4',
+                                    item.isDestructive &&
+                                      'text-red-500 dark:text-red-400',
+                                  )}
+                                  aria-hidden="true"
+                                />
+                                {item.name}
+                              </Link>
+                            )}
+                          </Menu.Item>
+                        ))}
                       </Menu.Items>
                     </Transition>
                   </Menu>

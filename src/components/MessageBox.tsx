@@ -248,12 +248,14 @@ const MessageBox = ({
     try {
       const citationRegex = new RegExp('\\[(\\d+)\\]', 'g');
       processed = processed.replace(citationRegex, (match, number) => {
-        const num = parseInt(number); // parseInt takes only one argument
+        const num = parseInt(number);
         if (isNaN(num) || num <= 0) {
           console.warn(`[MessageBox] Invalid citation number found: ${number}`);
           return match; // Return original if invalid
         }
+        // Check against sources if they exist
         if (message.sources && num <= message.sources.length) {
+          // Ensure the tag name is spelled correctly: "citation"
           return `<citation number="${number}"></citation>`;
         } else {
           // Optionally log if source index is out of bounds
