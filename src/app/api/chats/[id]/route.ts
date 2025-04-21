@@ -1,16 +1,23 @@
 import db from '@/lib/db';
 import { chats, messages } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { getSession } from '@auth0/nextjs-auth0';
 
 export const GET = async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) => {
+  const session = await getSession();
+  if (!session || !session.user || !session.user.sub) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const userId = session.user.sub;
+
   try {
     const { id } = await params;
 
     const chatExists = await db.query.chats.findFirst({
-      where: eq(chats.id, id),
+      where: and(eq(chats.id, id), eq(chats.userId, userId)),
     });
 
     if (!chatExists) {
@@ -41,18 +48,27 @@ export const DELETE = async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) => {
+  const session = await getSession();
+  if (!session || !session.user || !session.user.sub) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const userId = session.user.sub;
+
   try {
     const { id } = await params;
 
     const chatExists = await db.query.chats.findFirst({
-      where: eq(chats.id, id),
+      where: and(eq(chats.id, id), eq(chats.userId, userId)),
     });
 
     if (!chatExists) {
       return Response.json({ message: 'Chat not found' }, { status: 404 });
     }
 
-    await db.delete(chats).where(eq(chats.id, id)).execute();
+    await db
+      .delete(chats)
+      .where(and(eq(chats.id, id), eq(chats.userId, userId)))
+      .execute();
     await db.delete(messages).where(eq(messages.chatId, id)).execute();
 
     return Response.json(

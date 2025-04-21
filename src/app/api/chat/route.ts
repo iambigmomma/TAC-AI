@@ -24,6 +24,8 @@ import {
 } from '@/lib/config';
 import { SearchMode } from '@/components/ChatWindow';
 import { getRagflowChatCompletionNonStream } from '@/lib/ragflow';
+import { getSession } from '@auth0/nextjs-auth0';
+import { type Session } from '@auth0/nextjs-auth0';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,9 +63,10 @@ const handleHistorySave = async (
   humanMessageId: string,
   focusMode: string,
   files: string[],
+  userId: string,
 ) => {
   const chat = await db.query.chats.findFirst({
-    where: eq(chats.id, message.chatId),
+    where: and(eq(chats.id, message.chatId), eq(chats.userId, userId)),
   });
 
   if (!chat) {
@@ -75,6 +78,7 @@ const handleHistorySave = async (
         createdAt: new Date().toString(),
         focusMode: focusMode,
         files: files.map(getFileDetails),
+        userId: userId,
       })
       .execute();
   }
@@ -146,6 +150,15 @@ const getPromptsForFocus = (focusMode: string) => {
 };
 
 export const POST = async (req: Request) => {
+  const session = await getSession();
+  if (!session || !session.user || !session.user.sub) {
+    return Response.json(
+      { error: 'Unauthorized: User not logged in' },
+      { status: 401 },
+    );
+  }
+  const userId = session.user.sub;
+
   try {
     const body = (await req.json()) as Body;
     const { message, searchMode = 'web', focusMode } = body;
@@ -216,7 +229,13 @@ export const POST = async (req: Request) => {
       message.messageId ?? crypto.randomBytes(7).toString('hex');
     const aiMessageId = crypto.randomBytes(7).toString('hex');
 
-    await handleHistorySave(message, humanMessageId, focusMode, body.files);
+    await handleHistorySave(
+      message,
+      humanMessageId,
+      focusMode,
+      body.files,
+      userId,
+    );
 
     if (searchMode === 'docs') {
       console.log(
@@ -250,6 +269,9 @@ export const POST = async (req: Request) => {
         messageId: aiMessageId,
       });
     } else {
+      console.log(
+        `[API /chat] Handling non-docs search (mode: ${searchMode}, focus: ${focusMode})`,
+      );
       const responseStream = new TransformStream();
       const writer = responseStream.writable.getWriter();
       const encoder = new TextEncoder();
@@ -265,6 +287,10 @@ export const POST = async (req: Request) => {
         let recievedMessage = '';
         let sources: any[] = [];
         emitter.on('data', (data) => {
+          console.log(
+            '[API /chat] Stream emitter: data received',
+            data.substring(0, 100),
+          );
           const parsedData = JSON.parse(data);
           if (parsedData.type === 'response') {
             streamWriter.write(
@@ -291,6 +317,7 @@ export const POST = async (req: Request) => {
           }
         });
         emitter.on('end', () => {
+          console.log('[API /chat] Stream emitter: end received');
           streamWriter.write(
             textEncoder.encode(
               JSON.stringify({
@@ -315,6 +342,7 @@ export const POST = async (req: Request) => {
             .execute();
         });
         emitter.on('error', (data) => {
+          console.error('[API /chat] Stream emitter: error received', data);
           const parsedData = JSON.parse(data);
           streamWriter.write(
             textEncoder.encode(
@@ -350,6 +378,13 @@ export const POST = async (req: Request) => {
         responsePrompt: selectedPrompts.responsePrompt,
         activeEngines: ['google'],
       };
+      console.log(
+        '[API /chat] Preparing MetaSearchAgent (LLM: ' +
+          llm?.constructor?.name +
+          ', Embedding: ' +
+          embedding?.constructor?.name +
+          ')',
+      );
       const agent = new MetaSearchAgent(agentConfig);
       const historyMessages: BaseMessage[] = body.history.map((msg) => {
         if (msg[0] === 'human') return new HumanMessage(msg[1]);
@@ -357,18 +392,53 @@ export const POST = async (req: Request) => {
       });
       const systemInstructions =
         body.systemInstructions || selectedPrompts.responsePrompt;
-      const agentEmitter = await agent.searchAndAnswer(
-        message.content,
-        historyMessages,
-        llm!,
-        embedding!,
-        body.optimizationMode,
-        body.files,
-        systemInstructions,
-      );
-      agentEmitter.on('data', (data) => searchEmitter.emit('data', data));
-      agentEmitter.on('end', () => searchEmitter.emit('end'));
-      agentEmitter.on('error', (error) => searchEmitter.emit('error', error));
+
+      try {
+        console.log('[API /chat] Calling agent.searchAndAnswer...');
+        const agentEmitter = await agent.searchAndAnswer(
+          message.content,
+          historyMessages,
+          llm!,
+          embedding!,
+          body.optimizationMode,
+          body.files,
+          systemInstructions,
+        );
+        console.log(
+          '[API /chat] agent.searchAndAnswer call finished, attaching listeners.',
+        );
+
+        agentEmitter.on('data', (data) => {
+          console.log(
+            '[API /chat] Agent emitter: data received',
+            data.substring(0, 100),
+          );
+          searchEmitter.emit('data', data);
+        });
+        agentEmitter.on('end', () => {
+          console.log('[API /chat] Agent emitter: end received');
+          searchEmitter.emit('end');
+        });
+        agentEmitter.on('error', (error) => {
+          console.error('[API /chat] Agent emitter: error received', error);
+          searchEmitter.emit('error', error);
+        });
+      } catch (agentError) {
+        console.error(
+          '[API /chat] Error during agent.searchAndAnswer execution:',
+          agentError,
+        );
+        writer.write(
+          encoder.encode(
+            JSON.stringify({
+              type: 'error',
+              data: `Agent execution failed: ${(agentError as Error).message}`,
+              messageId: aiMessageId,
+            }) + '\n',
+          ),
+        );
+        writer.close();
+      }
 
       return new Response(responseStream.readable, {
         headers: {
@@ -379,7 +449,7 @@ export const POST = async (req: Request) => {
       });
     }
   } catch (e) {
-    console.error('API Route Error:', e);
+    console.error('[API /chat] Overall route error:', e);
     return Response.json(
       { error: `Server error: ${(e as Error).message}` },
       { status: 500 },

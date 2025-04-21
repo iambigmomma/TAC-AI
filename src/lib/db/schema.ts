@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { text, integer, sqliteTable } from 'drizzle-orm/sqlite-core';
+import { text, integer, sqliteTable, index } from 'drizzle-orm/sqlite-core';
 
 export const messages = sqliteTable('messages', {
   id: integer('id').primaryKey(),
@@ -17,13 +17,20 @@ interface File {
   fileId: string;
 }
 
-export const chats = sqliteTable('chats', {
-  id: text('id').primaryKey().notNull(),
-  title: text('title').notNull(),
-  createdAt: text('created_at').notNull(),
-  focusMode: text('focus_mode').notNull(),
-  files: text('files', { mode: 'json' })
-    .$type<File[]>()
-    .default(sql`'[]'`),
-  ragflowSessionId: text('ragflow_session_id').unique(),
-});
+export const chats = sqliteTable(
+  'chats',
+  {
+    id: text('id').primaryKey().notNull(),
+    title: text('title').notNull(),
+    createdAt: text('created_at').notNull(),
+    focusMode: text('focus_mode').notNull(),
+    files: text('files', { mode: 'json' })
+      .$type<File[]>()
+      .default(sql`'[]'`),
+    ragflowSessionId: text('ragflow_session_id').unique(),
+    userId: text('user_id').notNull(),
+  },
+  (table) => ({
+    userIdx: index('user_idx').on(table.userId),
+  }),
+);
