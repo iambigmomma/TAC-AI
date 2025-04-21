@@ -287,33 +287,66 @@ export const POST = async (req: Request) => {
         let recievedMessage = '';
         let sources: any[] = [];
         emitter.on('data', (data) => {
+          // Log the raw data received from the internal emitter
           console.log(
-            '[API /chat] Stream emitter: data received',
-            data.substring(0, 100),
+            '[API /chat] handleNonRagflowStream: Raw data received:',
+            data,
           );
-          const parsedData = JSON.parse(data);
-          if (parsedData.type === 'response') {
-            streamWriter.write(
-              textEncoder.encode(
-                JSON.stringify({
+
+          // Basic check if data looks like a stringified JSON object before parsing
+          if (
+            typeof data === 'string' &&
+            data.startsWith('{') &&
+            data.endsWith('}')
+          ) {
+            try {
+              const parsedData = JSON.parse(data); // Parses the JSON sent by handleStream
+              console.log(
+                '[API /chat] handleNonRagflowStream: Parsed internal data:',
+                parsedData,
+              );
+
+              if (parsedData.type === 'response') {
+                recievedMessage += parsedData.data;
+                const messageToSend = JSON.stringify({
                   type: 'message',
                   data: parsedData.data,
                   messageId: msgId,
-                }) + '\n',
-              ),
-            );
-            recievedMessage += parsedData.data;
-          } else if (parsedData.type === 'sources') {
-            streamWriter.write(
-              textEncoder.encode(
-                JSON.stringify({
+                });
+                streamWriter.write(textEncoder.encode(messageToSend + '\n'));
+              } else if (parsedData.type === 'sources') {
+                sources = parsedData.data;
+                const sourcesToSend = JSON.stringify({
                   type: 'sources',
                   data: parsedData.data,
                   messageId: msgId,
-                }) + '\n',
-              ),
+                });
+                console.log(
+                  '[API /chat] handleNonRagflowStream: Writing sources to response stream:',
+                  sourcesToSend,
+                );
+                streamWriter.write(textEncoder.encode(sourcesToSend + '\n'));
+              }
+              // Add handling for other expected types if necessary
+            } catch (parseError) {
+              console.error(
+                '[API /chat] handleNonRagflowStream: Failed to parse internal JSON data:',
+                data,
+                parseError,
+              );
+              // Log the specific error message along with the data
+              console.error(
+                `[API /chat] handleNonRagflowStream: Parse Error -> ${(parseError as Error).message}`,
+              );
+              // Decide how to handle parse errors - maybe send an error chunk to frontend?
+            }
+          } else {
+            // Log unexpected data format
+            console.warn(
+              '[API /chat] handleNonRagflowStream: Received unexpected data format from internal emitter:',
+              data,
             );
-            sources = parsedData.data;
+            // Avoid writing potentially corrupt data to the main stream
           }
         });
         emitter.on('end', () => {
@@ -390,8 +423,7 @@ export const POST = async (req: Request) => {
         if (msg[0] === 'human') return new HumanMessage(msg[1]);
         else return new AIMessage(msg[1]);
       });
-      const systemInstructions =
-        body.systemInstructions || selectedPrompts.responsePrompt;
+      const systemInstructions = body.systemInstructions || '';
 
       try {
         console.log('[API /chat] Calling agent.searchAndAnswer...');

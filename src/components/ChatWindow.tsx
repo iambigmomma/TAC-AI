@@ -223,8 +223,6 @@ const loadMessages = async (
     return [msg.role, msg.content];
   }) as [string, string][];
 
-  console.debug(new Date(), 'app:messages_loaded');
-
   document.title = messages[0].content;
 
   const files = data.chat.files.map((file: any) => {
@@ -274,7 +272,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
       setIsConfigReady,
       setHasError,
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [loading, setLoading] = useState(false);
@@ -316,7 +313,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
       setIsMessagesLoaded(true);
       setChatId(crypto.randomBytes(20).toString('hex'));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const messagesRef = useRef<Message[]>([]);
@@ -328,7 +324,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
   useEffect(() => {
     if (isMessagesLoaded && isConfigReady) {
       setIsReady(true);
-      console.debug(new Date(), 'app:ready');
     } else {
       setIsReady(false);
     }
@@ -371,6 +366,11 @@ const ChatWindow = ({ id }: { id?: string }) => {
     };
     setMessages((prev) => [...prev, assistantPlaceholderMessage]);
 
+    // Format history correctly for the backend API
+    const formattedHistory = messages
+      .slice(0, -1) // Exclude the assistant placeholder
+      .map((msg): [string, string] => [msg.role, msg.content]); // Map to [role, content] tuples
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -383,7 +383,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
             chatId: chatId,
             content: message,
           },
-          history: messages.slice(0, -1), // Send history *before* adding placeholder
+          history: formattedHistory, // Use the correctly formatted history
           focusMode: searchParams.get('fm') || 'webSearch',
           searchMode: searchMode,
           // ... other body parameters ...
@@ -415,8 +415,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
         // This now correctly refers to the component state
         // --- Non-Streaming Response Handling ---
         const result = await response.json();
-        console.log('Received final RAGflow response:', result);
-
         if (result.type === 'finalResponse') {
           // Update the placeholder message with the final content and references
           setMessages((prev) =>
@@ -444,19 +442,17 @@ const ChatWindow = ({ id }: { id?: string }) => {
         }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let partialChunk = '';
-        let currentContent = '';
-        let currentSources: Document[] | undefined = undefined; // For non-RAGflow sources
+        let partialChunk = ''; // Buffer for incomplete JSON lines
+        let accumulatedContent = ''; // Accumulator for the final answer string
+        let currentSources: Document[] | undefined = undefined;
 
-        // Define message handler for streaming parts
         const messageHandler = (data: any) => {
-          // This handler now only processes non-RAGflow streams ('message', 'sources', 'messageEnd', 'error')
           if (data.type === 'message') {
-            currentContent = data.data;
+            accumulatedContent += data.data;
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.messageId === assistantMessageId
-                  ? { ...msg, content: currentContent }
+                  ? { ...msg, content: accumulatedContent }
                   : msg,
               ),
             );
@@ -471,33 +467,44 @@ const ChatWindow = ({ id }: { id?: string }) => {
             );
           } else if (data.type === 'error') {
             toast.error(data.data);
-            // Remove placeholder on error?
             setMessages((prev) =>
               prev.filter((msg) => msg.messageId !== assistantMessageId),
             );
-            // Potentially re-throw or handle differently
           } else if (data.type === 'messageEnd') {
-            // Final update for content/sources just in case
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.messageId === assistantMessageId
-                  ? { ...msg, content: currentContent, sources: currentSources }
+                  ? {
+                      ...msg,
+                      content: accumulatedContent,
+                      sources: currentSources,
+                    }
                   : msg,
               ),
             );
           }
         };
 
-        // Stream processing loop (similar to before, but only for non-docs)
+        // Stream processing loop
         while (true) {
           const { value, done } = await reader.read();
           if (done) {
-            console.log('[Stream Reader] Stream finished (non-docs).');
+            const finalJsonString = partialChunk.trim();
+            if (finalJsonString) {
+              try {
+                const json = JSON.parse(finalJsonString);
+                messageHandler(json);
+              } catch (error) {
+                console.error(
+                  '[Stream Parser] Failed to parse final JSON chunk (non-docs):',
+                  finalJsonString,
+                  error,
+                );
+              }
+            }
             break;
           }
-          const decodedChunk = decoder.decode(value, { stream: true });
-          partialChunk += decodedChunk;
-
+          partialChunk += decoder.decode(value, { stream: true });
           let newlineIndex;
           while ((newlineIndex = partialChunk.indexOf('\n')) >= 0) {
             const jsonString = partialChunk.substring(0, newlineIndex).trim();
@@ -514,20 +521,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
                 );
               }
             }
-          }
-        }
-        // Handle final chunk if any (non-docs)
-        const remainingJsonString = partialChunk.trim();
-        if (remainingJsonString) {
-          try {
-            const json = JSON.parse(remainingJsonString);
-            messageHandler(json);
-          } catch (error) {
-            console.error(
-              '[Stream Parser] Failed to parse final JSON chunk (non-docs):',
-              remainingJsonString,
-              error,
-            );
           }
         }
       }
@@ -570,7 +563,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
     if (isReady && initialMessage && isConfigReady) {
       sendMessage(initialMessage);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfigReady, isReady, initialMessage]);
 
   if (hasError) {

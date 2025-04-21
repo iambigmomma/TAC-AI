@@ -24,6 +24,7 @@ import computeSimilarity from '../utils/computeSimilarity';
 import formatChatHistoryAsString from '../utils/formatHistory';
 import eventEmitter from 'events';
 import { StreamEvent } from '@langchain/core/tracers/log_stream';
+import { IterableReadableStream } from '@langchain/core/utils/stream';
 
 export interface MetaSearchAgentType {
   searchAndAnswer: (
@@ -80,16 +81,11 @@ class MetaSearchAgent implements MetaSearchAgentType {
         let question = this.config.summarizer
           ? await questionOutputParser.parse(input)
           : input;
-
         if (question === 'not_needed') {
           return { query: '', docs: [] };
         }
 
         if (links.length > 0) {
-          if (question.length === 0) {
-            question = 'summarize';
-          }
-
           let docs: Document[] = [];
 
           const linkDocs = await getDocumentsFromLinks({ links });
@@ -204,91 +200,66 @@ class MetaSearchAgent implements MetaSearchAgentType {
           return { query: question, docs: docs };
         } else {
           question = question.replace(/<think>.*?<\/think>/g, '');
+          try {
+            const res = await searchSearxng(question, {
+              language: 'en',
+              engines: this.config.activeEngines,
+            });
 
-          const res = await searchSearxng(question, {
-            language: 'en',
-            engines: this.config.activeEngines,
-          });
-
-          const documents = res.results.map(
-            (result) =>
-              new Document({
-                pageContent:
-                  result.content ||
-                  (this.config.activeEngines.includes('youtube')
-                    ? result.title
-                    : '') /* Todo: Implement transcript grabbing using Youtubei (source: https://www.npmjs.com/package/youtubei) */,
-                metadata: {
-                  title: result.title,
-                  url: result.url,
-                  ...(result.img_src && { img_src: result.img_src }),
-                },
-              }),
-          );
-
-          return { query: question, docs: documents };
+            const documents = res.results.map(
+              (result) =>
+                new Document({
+                  pageContent:
+                    result.content ||
+                    (this.config.activeEngines.includes('youtube')
+                      ? result.title
+                      : '') /* Todo: Implement transcript grabbing using Youtubei (source: https://www.npmjs.com/package/youtubei) */,
+                  metadata: {
+                    title: result.title,
+                    url: result.url,
+                    ...(result.img_src && { img_src: result.img_src }),
+                  },
+                }),
+            );
+            return { query: question, docs: documents };
+          } catch (searchError) {
+            console.error(
+              '[MetaSearchAgent] ERROR in searchSearxng:',
+              searchError,
+            );
+            return { query: question, docs: [] };
+          }
         }
-      }),
+      }).withConfig({ runName: 'SearchQueryExecutor' }),
     ]);
   }
 
   private async createAnsweringChain(
     llm: BaseChatModel,
-    fileIds: string[],
-    embeddings: Embeddings,
-    optimizationMode: 'speed' | 'balanced' | 'quality',
     systemInstructions: string,
   ) {
-    return RunnableSequence.from([
-      RunnableMap.from({
-        systemInstructions: () => systemInstructions,
-        query: (input: BasicChainInput) => input.query,
-        chat_history: (input: BasicChainInput) => input.chat_history,
-        date: () => new Date().toISOString(),
-        context: RunnableLambda.from(async (input: BasicChainInput) => {
-          const processedHistory = formatChatHistoryAsString(
-            input.chat_history,
-          );
+    type AnsweringChainInput = {
+      query: string;
+      chat_history: BaseMessage[];
+      context: string;
+      systemInstructions: string;
+      date: string;
+    };
 
-          let docs: Document[] | null = null;
-          let query = input.query;
+    const prompt = ChatPromptTemplate.fromMessages([
+      ['system', this.config.responsePrompt],
+      new MessagesPlaceholder('chat_history'),
+      ['user', '{query}'],
+    ]);
+    prompt.inputVariables = [
+      'context',
+      'date',
+      'systemInstructions',
+      'chat_history',
+      'query',
+    ];
 
-          if (this.config.searchWeb) {
-            const searchRetrieverChain =
-              await this.createSearchRetrieverChain(llm);
-
-            const searchRetrieverResult = await searchRetrieverChain.invoke({
-              chat_history: processedHistory,
-              query,
-            });
-
-            query = searchRetrieverResult.query;
-            docs = searchRetrieverResult.docs;
-          }
-
-          const sortedDocs = await this.rerankDocs(
-            query,
-            docs ?? [],
-            fileIds,
-            embeddings,
-            optimizationMode,
-          );
-
-          return sortedDocs;
-        })
-          .withConfig({
-            runName: 'FinalSourceRetriever',
-          })
-          .pipe(this.processDocs),
-      }),
-      ChatPromptTemplate.fromMessages([
-        ['system', this.config.responsePrompt],
-        new MessagesPlaceholder('chat_history'),
-        ['user', '{query}'],
-      ]),
-      llm,
-      this.strParser,
-    ]).withConfig({
+    return RunnableSequence.from([prompt, llm, this.strParser]).withConfig({
       runName: 'FinalResponseGenerator',
     });
   }
@@ -435,32 +406,38 @@ class MetaSearchAgent implements MetaSearchAgentType {
     stream: AsyncGenerator<StreamEvent, any, any>,
     emitter: eventEmitter,
   ) {
-    for await (const event of stream) {
-      if (
-        event.event === 'on_chain_end' &&
-        event.name === 'FinalSourceRetriever'
-      ) {
-        ``;
-        emitter.emit(
-          'data',
-          JSON.stringify({ type: 'sources', data: event.data.output }),
-        );
+    let streamedContent = '';
+    try {
+      for await (const event of stream) {
+        if (event.event === 'on_parser_stream') {
+          const chunk = event.data?.chunk;
+          if (typeof chunk === 'string' && chunk.length > 0) {
+            streamedContent += chunk;
+            emitter.emit(
+              'data',
+              JSON.stringify({
+                type: 'response',
+                data: chunk,
+              }),
+            );
+          }
+        }
       }
-      if (
-        event.event === 'on_chain_stream' &&
-        event.name === 'FinalResponseGenerator'
-      ) {
-        emitter.emit(
-          'data',
-          JSON.stringify({ type: 'response', data: event.data.chunk }),
-        );
-      }
-      if (
-        event.event === 'on_chain_end' &&
-        event.name === 'FinalResponseGenerator'
-      ) {
-        emitter.emit('end');
-      }
+      console.log(
+        '[MetaSearchAgent] handleStream finished. Total content length:',
+        streamedContent.length,
+      );
+      emitter.emit('end');
+    } catch (e) {
+      console.error('[MetaSearchAgent] handleStream ERROR:', e);
+      emitter.emit(
+        'error',
+        JSON.stringify({
+          type: 'error',
+          data: `Stream processing error: ${(e as Error).message}`,
+        }),
+      );
+      emitter.emit('end');
     }
   }
 
@@ -475,25 +452,83 @@ class MetaSearchAgent implements MetaSearchAgentType {
   ) {
     const emitter = new eventEmitter();
 
+    const searchRetrieverChain = await this.createSearchRetrieverChain(llm);
     const answeringChain = await this.createAnsweringChain(
       llm,
-      fileIds,
-      embeddings,
-      optimizationMode,
       systemInstructions,
     );
 
-    const stream = answeringChain.streamEvents(
-      {
-        chat_history: history,
-        query: message,
-      },
-      {
-        version: 'v1',
-      },
-    );
+    const process = async () => {
+      try {
+        const retrieverOutput: { query: string; docs: Document[] } =
+          await searchRetrieverChain.invoke({
+            chat_history: history,
+            query: message,
+          });
+        if (!retrieverOutput.docs || retrieverOutput.docs.length === 0) {
+          emitter.emit('end');
+          return;
+        }
 
-    this.handleStream(stream, emitter);
+        let finalDocs: Document[] = retrieverOutput.docs;
+
+        if (this.config.rerank) {
+          finalDocs = await this.rerankDocs(
+            retrieverOutput.query,
+            finalDocs,
+            fileIds,
+            embeddings,
+            optimizationMode,
+          );
+        }
+
+        if (finalDocs && finalDocs.length > 0) {
+          const sourceMetadata = finalDocs.map((doc) => ({
+            title: doc.metadata.title,
+            url: doc.metadata.url,
+            ...(doc.metadata.img_src && { img_src: doc.metadata.img_src }),
+          }));
+          console.log('[MetaSearchAgent] process: Emitting sources metadata.');
+          emitter.emit(
+            'data',
+            JSON.stringify({
+              type: 'sources',
+              data: sourceMetadata,
+            }),
+          );
+        }
+
+        const contextString = this.processDocs(finalDocs);
+
+        const stream: AsyncGenerator<StreamEvent> =
+          await answeringChain.streamEvents(
+            {
+              query: retrieverOutput.query,
+              chat_history: history,
+              context: contextString,
+              systemInstructions: systemInstructions,
+              date: new Date().toISOString(),
+            },
+            {
+              version: 'v1',
+            },
+          );
+
+        this.handleStream(stream, emitter);
+      } catch (error) {
+        console.error('[MetaSearchAgent] process ERROR:', error);
+        emitter.emit(
+          'error',
+          JSON.stringify({
+            type: 'error',
+            data: `Agent processing error: ${(error as Error).message}`,
+          }),
+        );
+        emitter.emit('end');
+      }
+    };
+
+    process();
 
     return emitter;
   }
