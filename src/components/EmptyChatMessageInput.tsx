@@ -1,11 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import {
-  Globe,
-  GraduationCap,
-  Database,
-  ChevronDown,
-  Check,
-} from 'lucide-react';
+import { Globe, Database, ChevronDown, Check } from 'lucide-react';
 import { useEffect, useRef, useState, Fragment } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import CopilotToggle from './MessageInputActions/Copilot';
@@ -30,13 +24,6 @@ const focusOptions = [
     description: '臺灣學術經典平臺',
     icon: Database,
     searchMode: 'docs' as SearchMode,
-  },
-  {
-    id: 'academicSearch',
-    name: '學術',
-    description: '中英論文庫',
-    icon: GraduationCap,
-    searchMode: 'web' as SearchMode,
   },
 ];
 
