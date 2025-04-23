@@ -22,7 +22,7 @@ import {
 import Markdown, { MarkdownToJSX } from 'markdown-to-jsx';
 import Copy from './MessageActions/Copy';
 import Rewrite from './MessageActions/Rewrite';
-import MessageSources, { type SourceMetadata } from './MessageSources';
+import MessageSources from './MessageSources';
 import SearchImages from './SearchImages';
 import SearchVideos from './SearchVideos';
 import { useSpeech } from 'react-text-to-speech';
@@ -44,41 +44,162 @@ const ThinkTagProcessor = ({ children }: { children: React.ReactNode }) => {
   return <ThinkBox content={children as string} />;
 };
 
-const ClickableCitation = ({ number }: { number: string }) => {
-  const num = parseInt(number);
-  if (isNaN(num) || num <= 0) {
-    return <span>[{number}]</span>; // Render as text if invalid
-  }
-  const targetId = `source-item-${num - 1}`; // ID corresponds to MessageSources item
+const CitationRenderer = ({
+  marker,
+  message,
+}: {
+  marker?: string;
+  message: Message;
+}) => {
+  if (!marker) return null; // Handle case where marker might be missing
 
-  // Function to handle smooth scroll
-  const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    const element = document.getElementById(targetId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // Optional: Add a temporary highlight effect
-      element.classList.add('ring-2', 'ring-blue-500');
-      setTimeout(() => {
-        element.classList.remove('ring-2', 'ring-blue-500');
-      }, 1500); // Remove highlight after 1.5 seconds
-    } else {
-      // Log if the element wasn't found
-      console.warn(
-        `[ClickableCitation] Element with ID "${targetId}" not found.`,
-      );
-    }
+  const citationIndex = parseInt(marker.replace(/##|\$\$/g, ''), 10);
+  // Use optional chaining here for safety
+  const referenceChunk = message.references?.chunks?.[citationIndex];
+
+  if (!referenceChunk) {
+    // Render a non-interactive error indicator if chunk not found
+    return (
+      <span className="text-red-500 font-semibold">[?{citationIndex + 1}]</span>
+    );
+  }
+
+  const hasSimilarity = (chunk: any): chunk is { similarity: number } => {
+    return typeof chunk.similarity === 'number';
   };
 
+  // Return the Popover structure directly, rendered as an inline span
   return (
-    <a
-      href={`#${targetId}`}
-      onClick={handleClick}
-      className="inline-block align-baseline bg-light-secondary dark:bg-dark-secondary text-blue-600 dark:text-blue-400 rounded px-1 py-0 mx-0.5 text-xs font-medium no-underline hover:underline focus:outline-none focus:ring-1 focus:ring-blue-500"
-      title={`Scroll to source ${num}`}
-    >
-      {num}
-    </a>
+    <Popover as="span" className="relative inline-block align-baseline">
+      <PopoverButton className="inline-flex items-center justify-center align-middle bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full w-4 h-4 text-[10px] font-semibold mx-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-opacity-75 hover:bg-blue-200 dark:hover:bg-blue-800 -translate-y-0.5">
+        {citationIndex + 1}
+      </PopoverButton>
+      <Transition
+        as={Fragment}
+        enter="transition ease-out duration-200"
+        enterFrom="opacity-0 translate-y-1"
+        enterTo="opacity-100 translate-y-0"
+        leave="transition ease-in duration-150"
+        leaveFrom="opacity-100 translate-y-0"
+        leaveTo="opacity-0 translate-y-1"
+      >
+        {/* Render PopoverPanel as span, apply styling classes directly */}
+        <PopoverPanel
+          as="span"
+          className="absolute block z-10 w-screen min-w-[320px] max-w-md px-4 mt-1 left-0 sm:px-0 lg:max-w-lg"
+        >
+          {/* Remove wrapping divs, apply styles to the panel span directly? */}
+          {/* NOTE: Applying all styles directly to span might be tricky. Let's try keeping one inner div but ensure panel is span */}
+          {/* Reverting Panel to div, keep Popover as span might be better? Let's try simplest: Panel as span, minimal inner structure */}
+          <span className="block overflow-hidden rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white dark:bg-gray-800 p-4">
+            {/* Content inside uses spans */}
+            {referenceChunk.document_name && (
+              <span
+                className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 truncate"
+                title={referenceChunk.document_name}
+              >
+                Document: {referenceChunk.document_name}
+              </span>
+            )}
+            <span className="block text-sm text-gray-800 dark:text-gray-200 max-h-60 overflow-y-auto">
+              {referenceChunk.content}
+            </span>
+            {hasSimilarity(referenceChunk) && (
+              /* Keep p here as it's inside the styled span, not directly in Markdown's p */
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                Similarity: {(referenceChunk.similarity * 100).toFixed(1)}%
+              </p>
+            )}
+          </span>
+        </PopoverPanel>
+      </Transition>
+    </Popover>
+  );
+};
+
+// Component to render Web search citations as Popovers
+const WebCitationRenderer = ({
+  number,
+  message,
+}: {
+  number?: string;
+  message: Message;
+}) => {
+  if (!number) return null;
+  const citationIndex = parseInt(number, 10) - 1; // Adjust for 0-based index
+
+  if (isNaN(citationIndex) || citationIndex < 0) {
+    return <span className="text-red-500 font-semibold">?[{number}]?</span>;
+  }
+
+  const source = message.sources?.[citationIndex];
+
+  if (!source?.url || !source?.title) {
+    // Check if source and necessary fields exist
+    console.warn(
+      `[WebCitationRenderer] Source or required fields (url, title) not found for index ${citationIndex} (number ${number})`,
+    );
+    return <span className="text-red-500 font-semibold">?[{number}]?</span>;
+  }
+
+  const { url, title } = source;
+  const favIconUrl = `https://s2.googleusercontent.com/s2/favicons?domain_url=${url}`;
+
+  return (
+    <Popover as="span" className="relative inline-block align-baseline">
+      {/* Use a different color scheme for web popovers? Green maybe? */}
+      <PopoverButton className="inline-flex items-center justify-center align-middle bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded-full w-4 h-4 text-[10px] font-semibold mx-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-opacity-75 hover:bg-green-200 dark:hover:bg-green-800 -translate-y-0.5">
+        {number} {/* Display original number */}
+      </PopoverButton>
+      <Transition
+        as={Fragment}
+        enter="transition ease-out duration-200"
+        enterFrom="opacity-0 translate-y-1"
+        enterTo="opacity-100 translate-y-0"
+        leave="transition ease-in duration-150"
+        leaveFrom="opacity-100 translate-y-0"
+        leaveTo="opacity-0 translate-y-1"
+      >
+        <PopoverPanel
+          as="span"
+          className="absolute block z-10 w-screen min-w-[300px] max-w-xs px-4 mt-1 left-0 sm:px-0"
+        >
+          <span className="block overflow-hidden rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white dark:bg-gray-800 p-3">
+            {title && (
+              <span
+                className="flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate"
+                title={title}
+              >
+                {url !== '#' &&
+                  url !== 'File' && ( // Don't show favicon for placeholder URLs
+                    <img
+                      src={favIconUrl}
+                      alt=""
+                      className="inline h-4 w-4 mr-1.5 align-middle rounded-sm flex-shrink-0"
+                      // Add error handling for favicon if needed
+                      onError={(e) => (e.currentTarget.style.display = 'none')}
+                    />
+                  )}
+                <span className="truncate">{title}</span>
+              </span>
+            )}
+            {url &&
+              url !== '#' &&
+              url !== 'File' && ( // Don't show link for placeholder URLs
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
+                  title={url}
+                >
+                  {url}
+                </a>
+              )}
+          </span>
+        </PopoverPanel>
+      </Transition>
+    </Popover>
   );
 };
 
@@ -101,8 +222,11 @@ const MessageBox = ({
   rewrite: (messageId: string) => void;
   sendMessage: (message: string) => void;
 }) => {
-  const [speechMessage, setSpeechMessage] = useState(() =>
-    message.content.replace(/\\[\\d+\\]/g, ''),
+  const [speechMessage, setSpeechMessage] = useState(
+    () =>
+      message.content
+        .replace(/(##\d+\$\$)/g, '') // Remove RAGFlow markers for speech
+        .replace(/\[\d+\]/g, ''), // Remove web markers for speech
   );
 
   // --- State for Loading Animation Text ---
@@ -142,150 +266,70 @@ const MessageBox = ({
   // --- End Loading Animation Text State ---
 
   useEffect(() => {
-    setSpeechMessage(message.content.replace(/\\[\\d+\\]/g, ''));
+    setSpeechMessage(
+      message.content.replace(/(##\d+\$\$)/g, '').replace(/\[\d+\]/g, ''),
+    );
   }, [message.content]);
 
   const { speechStatus, start, stop } = useSpeech({ text: speechMessage });
 
-  // New component specifically for rendering the citation popover via Markdown override
-  const CitationRenderer = ({ marker }: { marker?: string }) => {
-    if (!marker) return null; // Handle case where marker might be missing
-
-    const citationIndex = parseInt(marker.replace(/##|\$\$/g, ''), 10);
-    // Use optional chaining here for safety
-    const referenceChunk = message.references?.chunks?.[citationIndex];
-
-    if (!referenceChunk) {
-      // Render a non-interactive error indicator if chunk not found
-      return (
-        <span className="text-red-500 font-semibold">
-          [?{citationIndex + 1}]
-        </span>
-      );
-    }
-
-    const hasSimilarity = (chunk: any): chunk is { similarity: number } => {
-      return typeof chunk.similarity === 'number';
-    };
-
-    // Return the Popover structure directly, rendered as an inline span
-    return (
-      <Popover as="span" className="relative inline-block align-baseline">
-        <PopoverButton className="inline-flex items-center justify-center align-middle bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full w-4 h-4 text-[10px] font-semibold mx-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-opacity-75 hover:bg-blue-200 dark:hover:bg-blue-800 -translate-y-0.5">
-          {citationIndex + 1}
-        </PopoverButton>
-        <Transition
-          as={Fragment}
-          enter="transition ease-out duration-200"
-          enterFrom="opacity-0 translate-y-1"
-          enterTo="opacity-100 translate-y-0"
-          leave="transition ease-in duration-150"
-          leaveFrom="opacity-100 translate-y-0"
-          leaveTo="opacity-0 translate-y-1"
-        >
-          {/* Render PopoverPanel as span, apply styling classes directly */}
-          <PopoverPanel
-            as="span"
-            className="absolute block z-10 w-screen min-w-[320px] max-w-md px-4 mt-1 left-0 sm:px-0 lg:max-w-lg"
-          >
-            {/* Remove wrapping divs, apply styles to the panel span directly? */}
-            {/* NOTE: Applying all styles directly to span might be tricky. Let's try keeping one inner div but ensure panel is span */}
-            {/* Reverting Panel to div, keep Popover as span might be better? Let's try simplest: Panel as span, minimal inner structure */}
-            <span className="block overflow-hidden rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white dark:bg-gray-800 p-4">
-              {/* Content inside uses spans */}
-              {referenceChunk.document_name && (
-                <span
-                  className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 truncate"
-                  title={referenceChunk.document_name}
-                >
-                  Document: {referenceChunk.document_name}
-                </span>
-              )}
-              <span className="block text-sm text-gray-800 dark:text-gray-200 max-h-60 overflow-y-auto">
-                {referenceChunk.content}
-              </span>
-              {hasSimilarity(referenceChunk) && (
-                /* Keep p here as it's inside the styled span, not directly in Markdown's p */
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                  Similarity: {(referenceChunk.similarity * 100).toFixed(1)}%
-                </p>
-              )}
-            </span>
-          </PopoverPanel>
-        </Transition>
-      </Popover>
-    );
+  // Update Markdown overrides to include both citation renderers
+  const markdownOverrides: MarkdownToJSX.Options = {
+    overrides: {
+      think: {
+        component: ThinkTagProcessor,
+      },
+      // Docs Popover
+      'citation-placeholder': {
+        component: (props: { marker?: string }) => (
+          <CitationRenderer {...props} message={message} />
+        ),
+      },
+      // Web Popover (New)
+      'web-citation-placeholder': {
+        // Pass message prop explicitly to WebCitationRenderer
+        component: (props: { number?: string }) => (
+          <WebCitationRenderer {...props} message={message} />
+        ),
+      },
+    },
   };
 
-  // Update Markdown overrides to use the new CitationRenderer
-  const markdownOverrides: MarkdownToJSX.Options = useMemo(
-    () => ({
-      overrides: {
-        think: {
-          component: ThinkTagProcessor,
-        },
-        // Override for the custom <citation> tag we'll insert
-        citation: {
-          component: ClickableCitation,
-        },
-        // RAGFlow citation override (keep existing logic)
-        'citation-placeholder': {
-          component: CitationRenderer,
-          props: {
-            references: message.references,
-          },
-        },
-      },
-    }),
-    [message.references],
-  ); // Dependencies might be needed if CitationRenderer relies on props/state
+  // Prepare content string with placeholders for BOTH citation types
+  const contentWithPlaceholders = useMemo(() => {
+    let processed = message.content || '';
 
-  // Prepare content string with <citation> tags
-  const contentWithCitationTags = useMemo(() => {
-    // Start with original content as default
-    let processed = message.content || ''; // Ensure processed is always a string
-
-    try {
-      const citationRegex = new RegExp('\\[(\\d+)\\]', 'g');
-      processed = processed.replace(citationRegex, (match, number) => {
-        const num = parseInt(number);
-        if (isNaN(num) || num <= 0) {
-          console.warn(`[MessageBox] Invalid citation number found: ${number}`);
-          return match; // Return original if invalid
-        }
-        // Check against sources if they exist
-        if (message.sources && num <= message.sources.length) {
-          // Ensure the tag name is spelled correctly: "citation"
-          return `<citation number="${number}"></citation>`;
+    if (message.references) {
+      // DOCS mode: Replace ##N$$ with <citation-placeholder...>
+      processed = processed.replace(/(##\d+\$\$)/g, (match) => {
+        const citationIndex = parseInt(match.replace(/##|\$\$/g, ''), 10);
+        if (message.references?.chunks?.[citationIndex]) {
+          return `<citation-placeholder marker="${match}"></citation-placeholder>`;
         } else {
-          // Optionally log if source index is out of bounds
-          // console.warn(`[MessageBox] Citation [${num}] out of bounds for sources length ${message.sources?.length}`);
-          return match; // Return original if source doesn't exist for the number
+          console.warn(
+            `[contentWithPlaceholders Docs] Chunk not found for marker ${match}, keeping plain text.`,
+          );
+          return match;
         }
       });
-    } catch (e) {
-      console.error(
-        '[MessageBox] Error during standard citation replacement:',
-        e,
-      );
-      // On error, processed keeps its current value (potentially original or partially processed)
+      // Q: Should we also handle [N] here if backend sends both formats?
+      // For now, assuming only ##N$$ for docs.
+    } else if (message.sources) {
+      // WEB mode: Replace [N] with <web-citation-placeholder...>
+      processed = processed.replace(/\[(\d+)\]/g, (match, number) => {
+        const citationIndex = parseInt(number, 10) - 1;
+        if (message.sources?.[citationIndex]) {
+          // Check only for source existence, renderer checks details
+          return `<web-citation-placeholder number="${number}"></web-citation-placeholder>`;
+        } else {
+          console.warn(
+            `[contentWithPlaceholders Web] Source not found for number ${number}, keeping plain text.`,
+          );
+          return match;
+        }
+      });
     }
-
-    // Handle RAGflow placeholders AFTER standard replacement
-    if (message.references) {
-      try {
-        const ragflowRegex = new RegExp('(##\\d+\\$$)', 'g');
-        processed = processed.replace(ragflowRegex, (match) => {
-          return `<citation-placeholder marker="${match}"></citation-placeholder>`;
-        });
-      } catch (e) {
-        console.error(
-          '[MessageBox] Error during RAGflow citation replacement:',
-          e,
-        );
-        // On error, processed keeps its current value
-      }
-    }
+    // Note: This simple replace doesn't handle complex cases like [1, 2] or [[1]]
 
     // Handle <think> tags (ensure they remain)
     if (processed.includes('<think>')) {
@@ -295,40 +339,30 @@ const MessageBox = ({
         processed += '</think> <a> </a>';
       }
     }
-    // Ensure a string is always returned
+
     // --- Add final cleanup step ---
-    // Remove lines starting with "Source:" or "Soorce:" etc., often appearing at the end
     processed = processed
-      .replace(/\n[\s]*(So?urce:|Sourcee:|Reference:)[^\n]+/g, (match) => {
-        // Only remove if it looks like a source list item (contains [digit] or http)
+      .replace(/\n[ ]*(So?urce:|Sourcee:|Reference:)[^/n]+/g, (match) => {
         if (
           match.includes('[') ||
           match.includes(']') ||
           match.includes('http')
         ) {
-          return ''; // Remove the line
+          return '';
         }
-        return match; // Keep the line if it doesn't look like a source item
+        return match;
       })
-      .trim(); // Trim whitespace from the final result
+      .trim();
     // --- End cleanup step ---
     return processed;
-  }, [message.content, message.references, message.sources]);
-
-  // --- Log the processed content to check tags ---
-  useEffect(() => {
-    console.log(
-      '[MessageBox] Content with citation tags:',
-      contentWithCitationTags,
-    );
-  }, [contentWithCitationTags]);
+  }, [message.content, message.references, message.sources]); // Added message.sources
 
   // --- Typewriter Logic ---
   // Only apply typewriter effect to the last assistant message when not loading
   const isTyping = !loading && isLast && message.role === 'assistant';
   // Pass the FINAL prepared content to the typewriter
   const typedContent = useTypewriter(
-    isTyping ? contentWithCitationTags || '' : '',
+    isTyping ? contentWithPlaceholders : '',
     1,
   );
 
@@ -353,6 +387,7 @@ const MessageBox = ({
           </h2>
         </div>
       )}
+
       {message.role === 'assistant' &&
         (loading && isLast ? (
           <div className="flex flex-col space-y-2 items-start w-full lg:w-9/12 mt-4 mb-6">
@@ -373,6 +408,20 @@ const MessageBox = ({
               ref={dividerRef}
               className="flex flex-col space-y-6 w-full lg:w-9/12"
             >
+              {message.sources && message.sources.length > 0 && (
+                <div className="flex flex-col space-y-2">
+                  <div className="flex flex-row items-center space-x-2">
+                    <BookCopy
+                      className="text-black dark:text-white"
+                      size={20}
+                    />
+                    <h3 className="text-black dark:text-white font-medium text-xl">
+                      Sources
+                    </h3>
+                  </div>
+                  <MessageSources sources={message.sources} />
+                </div>
+              )}
               <div className="flex flex-col space-y-2">
                 <div className="flex flex-row items-center space-x-2">
                   <Disc3
@@ -389,15 +438,13 @@ const MessageBox = ({
 
                 <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
                   <Markdown options={markdownOverrides}>
-                    {isTyping
-                      ? typedContent || ''
-                      : contentWithCitationTags || ''}
+                    {isTyping ? typedContent : contentWithPlaceholders}
                   </Markdown>
 
                   {hasReferences &&
                     (!isTyping ||
                       typedContent.length ===
-                        contentWithCitationTags.length) && (
+                        contentWithPlaceholders.length) && (
                       <div className="mt-6 border-t pt-4 border-gray-200 dark:border-gray-700 not-prose">
                         <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">
                           Referenced Documents:
@@ -408,7 +455,7 @@ const MessageBox = ({
                               <li
                                 key={index}
                                 className="truncate"
-                                title={agg.doc_name || 'Unknown Document'}
+                                title={agg.doc_name}
                               >
                                 {agg.doc_name || 'Unknown Document'}
                               </li>
@@ -422,7 +469,7 @@ const MessageBox = ({
                   ? null
                   : (!isTyping ||
                       typedContent.length ===
-                        contentWithCitationTags.length) && (
+                        contentWithPlaceholders.length) && (
                       <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
                         <div className="flex flex-row items-center space-x-1">
                           <Rewrite
@@ -460,7 +507,7 @@ const MessageBox = ({
                   message.role === 'assistant' &&
                   !loading &&
                   (!isTyping ||
-                    typedContent.length === contentWithCitationTags.length) && (
+                    typedContent.length === contentWithPlaceholders.length) && (
                     <>
                       <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
                       <div className="flex flex-col space-y-3 text-black dark:text-white">
@@ -502,35 +549,15 @@ const MessageBox = ({
                 query={history[messageIndex - 1].content}
                 chatHistory={history.slice(0, messageIndex - 1)}
                 messageId={message.messageId}
-                loading={loading}
-                isAssistantMessageLoaded={!loading && isLast}
               />
               <SearchVideos
                 chatHistory={history.slice(0, messageIndex - 1)}
                 query={history[messageIndex - 1].content}
                 messageId={message.messageId}
-                loading={loading}
-                isAssistantMessageLoaded={!loading && isLast}
               />
             </div>
           </div>
         ))}
-      {/* Sources section moved here - Use ternary operator for cleaner conditional rendering */}
-      {message.role === 'assistant' &&
-      !loading &&
-      message.sources &&
-      message.sources.length > 0 ? (
-        <div className="flex flex-col space-y-2 mt-6 lg:w-9/12">
-          <div className="flex flex-row items-center space-x-2">
-            <BookCopy className="text-black dark:text-white" size={20} />
-            <h3 className="text-black dark:text-white font-medium text-xl">
-              Sources
-            </h3>
-          </div>
-          <MessageSources sources={message.sources} />
-        </div>
-      ) : null}{' '}
-      {/* Return null if condition is false */}
     </div>
   );
 };
