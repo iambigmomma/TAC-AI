@@ -32,6 +32,7 @@ import {
   PopoverButton,
   PopoverPanel,
   Transition,
+  Tab,
 } from '@headlessui/react';
 import {
   type RagflowReference,
@@ -408,141 +409,247 @@ const MessageBox = ({
               ref={dividerRef}
               className="flex flex-col space-y-6 w-full lg:w-9/12"
             >
-              {message.sources && message.sources.length > 0 && (
-                <div className="flex flex-col space-y-2">
-                  <div className="flex flex-row items-center space-x-2">
-                    <BookCopy
-                      className="text-black dark:text-white"
-                      size={20}
-                    />
-                    <h3 className="text-black dark:text-white font-medium text-xl">
-                      Sources
-                    </h3>
-                  </div>
-                  <MessageSources sources={message.sources} />
-                </div>
-              )}
-              <div className="flex flex-col space-y-2">
-                <div className="flex flex-row items-center space-x-2">
-                  <Disc3
-                    className={cn(
-                      'text-black dark:text-white',
-                      isLast && loading ? 'animate-spin' : 'animate-none',
+              {/* === NEW Tabbed Interface === */}
+              <Tab.Group>
+                <Tab.List className="flex space-x-1 rounded-xl bg-light-100 dark:bg-dark-100 p-1 max-w-fit">
+                  {/* Answer Tab */}
+                  <Tab as={Fragment}>
+                    {({ selected }) => (
+                      <button
+                        className={cn(
+                          'w-full rounded-lg py-1.5 px-3 text-sm font-medium leading-5 flex items-center space-x-1.5',
+                          'ring-white/60 ring-offset-2 ring-offset-blue-400 focus:outline-none focus:ring-2',
+                          selected
+                            ? 'bg-white dark:bg-dark-secondary shadow text-blue-700 dark:text-white'
+                            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
+                        )}
+                      >
+                        <Disc3 size={16} />
+                        <span>Answer</span>
+                      </button>
                     )}
-                    size={20}
-                  />
-                  <h3 className="text-black dark:text-white font-medium text-xl">
-                    Answer
-                  </h3>
-                </div>
+                  </Tab>
 
-                <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
-                  <Markdown options={markdownOverrides}>
-                    {isTyping ? typedContent : contentWithPlaceholders}
-                  </Markdown>
-
-                  {hasReferences &&
-                    (!isTyping ||
-                      typedContent.length ===
-                        contentWithPlaceholders.length) && (
-                      <div className="mt-6 border-t pt-4 border-gray-200 dark:border-gray-700 not-prose">
-                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                          Referenced Documents:
-                        </h4>
-                        <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
-                          {message.references?.doc_aggs?.map(
-                            (agg: RagflowDocAgg, index: number) => (
-                              <li
-                                key={index}
-                                className="truncate"
-                                title={agg.doc_name}
-                              >
-                                {agg.doc_name || 'Unknown Document'}
-                              </li>
-                            ),
+                  {/* Sources Tab (Conditional) */}
+                  {(message.sources && message.sources.length > 0) ||
+                  (message.references?.chunks &&
+                    message.references.chunks.length > 0) ? (
+                    <Tab as={Fragment}>
+                      {({ selected }) => (
+                        <button
+                          className={cn(
+                            'w-full rounded-lg py-1.5 px-3 text-sm font-medium leading-5 flex items-center space-x-1.5',
+                            'ring-white/60 ring-offset-2 ring-offset-blue-400 focus:outline-none focus:ring-2',
+                            selected
+                              ? 'bg-white dark:bg-dark-secondary shadow text-blue-700 dark:text-white'
+                              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
                           )}
-                        </ul>
-                      </div>
+                        >
+                          <BookCopy size={16} />
+                          <span>Sources</span>
+                          <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                            {message.sources?.length ||
+                              message.references?.chunks?.length ||
+                              0}
+                          </span>
+                        </button>
+                      )}
+                    </Tab>
+                  ) : null}
+                </Tab.List>
+
+                <Tab.Panels className="mt-2">
+                  {/* Answer Panel */}
+                  <Tab.Panel
+                    className={cn(
+                      'rounded-xl focus:outline-none', // Basic panel styling
                     )}
-                </div>
-                {loading && isLast
-                  ? null
-                  : (!isTyping ||
-                      typedContent.length ===
-                        contentWithPlaceholders.length) && (
-                      <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
-                        <div className="flex flex-row items-center space-x-1">
-                          <Rewrite
-                            rewrite={rewrite}
-                            messageId={message.messageId}
-                          />
-                        </div>
-                        <div className="flex flex-row items-center space-x-1">
-                          <Copy
-                            initialMessage={message.content}
-                            message={message}
-                          />
-                          <button
-                            onClick={() => {
-                              if (speechStatus === 'started') {
-                                stop();
-                              } else {
-                                start();
-                              }
-                            }}
-                            className="p-2 text-black/70 dark:text-white/70 rounded-xl hover:bg-light-secondary dark:hover:bg-dark-secondary transition duration-200 hover:text-black dark:hover:text-white"
-                          >
-                            {speechStatus === 'started' ? (
-                              <StopCircle size={18} />
-                            ) : (
-                              <Volume2 size={18} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                {isLast &&
-                  message.suggestions &&
-                  message.suggestions.length > 0 &&
-                  message.role === 'assistant' &&
-                  !loading &&
-                  (!isTyping ||
-                    typedContent.length === contentWithPlaceholders.length) && (
-                    <>
-                      <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
-                      <div className="flex flex-col space-y-3 text-black dark:text-white">
-                        <div className="flex flex-row items-center space-x-2 mt-4">
-                          <Layers3 />
-                          <h3 className="text-xl font-medium">Related</h3>
-                        </div>
+                  >
+                    {/* === Move Answer Section Here === */}
+                    <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
+                      <Markdown options={markdownOverrides}>
+                        {isTyping ? typedContent : contentWithPlaceholders}
+                      </Markdown>
+                    </div>
+                    {/* Actions (Copy, Rewrite, etc.) and Related Suggestions go AFTER the Tab.Panels */}
+                  </Tab.Panel>
+
+                  {/* Sources Panel (Content to be added in next step) */}
+                  {(message.sources && message.sources.length > 0) ||
+                  (message.references?.chunks &&
+                    message.references.chunks.length > 0) ? (
+                    <Tab.Panel
+                      className={cn(
+                        'rounded-xl focus:outline-none p-3', // Basic panel styling, add padding
+                        'bg-light-secondary dark:bg-dark-secondary', // Add background like popovers?
+                      )}
+                    >
+                      {/* === Render Sources List === */}
+                      {message.sources ? (
+                        // === Web Sources List ===
                         <div className="flex flex-col space-y-3">
-                          {message.suggestions.map((suggestion, i) => (
-                            <div
-                              className="flex flex-col space-y-3 text-sm"
-                              key={i}
-                            >
-                              <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
-                              <div
-                                onClick={() => {
-                                  sendMessage(suggestion);
-                                }}
-                                className="cursor-pointer flex flex-row justify-between font-medium space-x-2 items-center"
+                          {message.sources.map((source, index) => {
+                            const favIconUrl = `https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`;
+                            const domainName = source.url.replace(
+                              /.+\/\/|www.|\..+/g,
+                              '',
+                            ); // Extract domain
+                            return (
+                              <a
+                                key={index}
+                                href={source.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block p-3 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
                               >
-                                <p className="transition duration-200 hover:text-[#24A0ED]">
-                                  {suggestion}
-                                </p>
-                                <Plus
-                                  size={20}
-                                  className="text-[#24A0ED] flex-shrink-0"
-                                />
+                                <div className="flex items-center space-x-3">
+                                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right">
+                                    {index + 1}
+                                  </span>
+                                  {source.url !== '#' &&
+                                    source.url !== 'File' && (
+                                      <img
+                                        src={favIconUrl}
+                                        alt=""
+                                        className="h-5 w-5 rounded flex-shrink-0"
+                                        onError={(e) =>
+                                          (e.currentTarget.style.display =
+                                            'none')
+                                        }
+                                      />
+                                    )}
+                                  <div className="flex-1 overflow-hidden">
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                      {source.title}
+                                    </p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                      {source.url}
+                                    </p>
+                                  </div>
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      ) : message.references?.chunks ? (
+                        // === Document References List ===
+                        <div className="flex flex-col space-y-3">
+                          {message.references.chunks.map((chunk, index) => (
+                            <div
+                              key={chunk.id || index} // Use chunk.id if available, otherwise index
+                              className="p-3 rounded-lg bg-light-100 dark:bg-dark-100"
+                            >
+                              <div className="flex items-start space-x-3">
+                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 pt-0.5">
+                                  ##{index}$$
+                                </span>
+                                <div className="flex-1 overflow-hidden">
+                                  {chunk.document_name && (
+                                    <p
+                                      className="text-sm font-medium text-gray-900 dark:text-white truncate mb-1"
+                                      title={chunk.document_name}
+                                    >
+                                      {chunk.document_name}
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-gray-700 dark:text-gray-300 max-h-20 overflow-y-auto">
+                                    {chunk.content}
+                                  </p>
+                                </div>
                               </div>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    </>
+                      ) : null}
+                      {/* === End Sources List === */}
+                    </Tab.Panel>
+                  ) : (
+                    // Render a dummy panel if Sources tab isn't shown? Or handle logic better in Tab.List?
+                    // Let's stick with conditional rendering for now.
+                    <Tab.Panel></Tab.Panel> // Need at least one panel per tab
                   )}
-              </div>
+                </Tab.Panels>
+              </Tab.Group>
+              {/* === End NEW Tabbed Interface === */}
+
+              {/* Actions (Copy, Rewrite, etc.) - Moved outside/after Tab.Panels */}
+              {loading && isLast
+                ? null
+                : (!isTyping ||
+                    typedContent.length === contentWithPlaceholders.length) && (
+                    <div className="flex flex-row items-center justify-between w-full text-black dark:text-white py-4 -mx-2">
+                      <div className="flex flex-row items-center space-x-1">
+                        <Rewrite
+                          rewrite={rewrite}
+                          messageId={message.messageId}
+                        />
+                      </div>
+                      <div className="flex flex-row items-center space-x-1">
+                        <Copy
+                          initialMessage={message.content}
+                          message={message}
+                        />
+                        <button
+                          onClick={() => {
+                            if (speechStatus === 'started') {
+                              stop();
+                            } else {
+                              start();
+                            }
+                          }}
+                          className="p-2 text-black/70 dark:text-white/70 rounded-xl hover:bg-light-secondary dark:hover:bg-dark-secondary transition duration-200 hover:text-black dark:hover:text-white"
+                        >
+                          {speechStatus === 'started' ? (
+                            <StopCircle size={18} />
+                          ) : (
+                            <Volume2 size={18} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+              {/* Related Suggestions - Moved outside/after Tab.Panels */}
+              {isLast &&
+                message.suggestions &&
+                message.suggestions.length > 0 &&
+                message.role === 'assistant' &&
+                !loading &&
+                (!isTyping ||
+                  typedContent.length === contentWithPlaceholders.length) && (
+                  <div className="pt-4">
+                    <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
+                    <div className="flex flex-col space-y-3 text-black dark:text-white mt-4">
+                      <div className="flex flex-row items-center space-x-2 mt-4">
+                        <Layers3 />
+                        <h3 className="text-xl font-medium">Related</h3>
+                      </div>
+                      <div className="flex flex-col space-y-3">
+                        {message.suggestions.map((suggestion, i) => (
+                          <div
+                            className="flex flex-col space-y-3 text-sm"
+                            key={i}
+                          >
+                            <div className="h-px w-full bg-light-secondary dark:bg-dark-secondary" />
+                            <div
+                              onClick={() => {
+                                sendMessage(suggestion);
+                              }}
+                              className="cursor-pointer flex flex-row justify-between font-medium space-x-2 items-center"
+                            >
+                              <p className="transition duration-200 hover:text-[#24A0ED]">
+                                {suggestion}
+                              </p>
+                              <Plus
+                                size={20}
+                                className="text-[#24A0ED] flex-shrink-0"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
             </div>
             <div className="lg:sticky lg:top-20 flex flex-col items-center space-y-3 w-full lg:w-3/12 z-30 h-full pb-4">
               <SearchImages
