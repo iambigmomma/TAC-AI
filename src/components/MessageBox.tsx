@@ -529,9 +529,10 @@ const MessageBox = ({
                           <BookCopy size={16} />
                           <span>Sources</span>
                           <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
-                            {message.sources?.length ||
-                              message.references?.chunks?.length ||
-                              0}
+                            {(message.sources?.length || 0) +
+                              (message.references?.chunks?.filter(
+                                (chunk) => !chunk.url,
+                              ).length || 0)}
                           </span>
                         </button>
                       )}
@@ -569,9 +570,54 @@ const MessageBox = ({
                         Sources
                       </h4>
 
-                      {/* === Web Sources Section === */}
+                      {/* === Document References Section (Moved First) === */}
+                      {message.references?.chunks &&
+                        message.references.chunks.filter((chunk) => !chunk.url)
+                          .length > 0 && (
+                          <div className="mb-4">
+                            {' '}
+                            {/* Add margin-bottom like web results had */}
+                            <h5 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
+                              聯合百科 Documents
+                            </h5>
+                            <div className="flex flex-col space-y-2">
+                              {message.references.chunks
+                                .filter((chunk) => !chunk.url) // Filter for document chunks here
+                                .map((chunk, index) => (
+                                  <div
+                                    key={chunk.id || `doc-${index}`}
+                                    className="p-2.5 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
+                                  >
+                                    <div className="flex items-start space-x-3">
+                                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right flex-shrink-0 pt-0.5">
+                                        {/* We might need a way to get the original doc citation number (##N$$) here if needed */}
+                                        {index + 1}
+                                      </span>
+                                      <div className="flex-1 overflow-hidden">
+                                        {chunk.document_name && (
+                                          <p
+                                            className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate"
+                                            title={chunk.document_name}
+                                          >
+                                            {chunk.document_name}
+                                          </p>
+                                        )}
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                                          {chunk.content}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                      {/* === Web Sources Section (Moved Second) === */}
                       {message.sources && message.sources.length > 0 && (
-                        <div className="mb-4">
+                        <div>
+                          {' '}
+                          {/* Remove mb-4 if it's the last element */}
                           <h5 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
                             Web Results
                           </h5>
@@ -624,50 +670,6 @@ const MessageBox = ({
                           </div>
                         </div>
                       )}
-
-                      {/* === Document References Section === */}
-                      {message.references?.chunks &&
-                        message.references.chunks.filter((chunk) => !chunk.url)
-                          .length > 0 && (
-                          <div>
-                            <h5 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
-                              聯合百科 Documents
-                            </h5>
-                            <div className="flex flex-col space-y-2">
-                              {message.references.chunks
-                                .filter((chunk) => !chunk.url) // Filter for document chunks here
-                                .map((chunk, index) => (
-                                  <div
-                                    key={chunk.id || `doc-${index}`}
-                                    className="p-2.5 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
-                                  >
-                                    <div className="flex items-start space-x-3">
-                                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right flex-shrink-0 pt-0.5">
-                                        {/* We might need a way to get the original doc citation number (##N$$) here if needed */}
-                                        {index + 1}
-                                      </span>
-                                      <div className="flex-1 overflow-hidden">
-                                        {chunk.document_name && (
-                                          <p
-                                            className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate"
-                                            title={chunk.document_name}
-                                          >
-                                            {chunk.document_name}
-                                          </p>
-                                        )}
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                                          {chunk.content}
-                                        </p>
-                                      </div>{' '}
-                                      {/* Close flex-1 div */}
-                                    </div>{' '}
-                                    {/* Close flex items-start div */}
-                                  </div> // Close inner mapped div
-                                ))}
-                            </div>{' '}
-                            {/* Close flex flex-col space-y-2 div */}
-                          </div> // Close conditional div for doc sources
-                        )}
                       {/* === End Combined Sources Rendering Logic === */}
                     </Tab.Panel>
                   ) : (
