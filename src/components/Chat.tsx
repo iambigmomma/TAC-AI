@@ -17,7 +17,6 @@ const Chat = ({
   files,
   setFiles,
   searchMode,
-  setSearchMode,
 }: {
   messages: Message[];
   sendMessage: (message: string) => void;
@@ -29,7 +28,6 @@ const Chat = ({
   files: File[];
   setFiles: (files: File[]) => void;
   searchMode: SearchMode;
-  setSearchMode: (mode: SearchMode) => void;
 }) => {
   const [dividerWidth, setDividerWidth] = useState(0);
   const dividerRef = useRef<HTMLDivElement | null>(null);
@@ -103,8 +101,6 @@ const Chat = ({
             setFileIds={setFileIds}
             files={files}
             setFiles={setFiles}
-            searchMode={searchMode}
-            setSearchMode={setSearchMode}
           />
         </div>
       )}

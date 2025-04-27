@@ -11,7 +11,7 @@ const SearchModeToggle: React.FC<SearchModeToggleProps> = ({
   searchMode,
   setSearchMode,
 }) => {
-  const modes: SearchMode[] = ['web', 'docs', 'both'];
+  const modes: SearchMode[] = ['web', 'docs'];
 
   return (
     <div className="flex items-center p-1 bg-gray-200 dark:bg-gray-700 rounded-lg space-x-1">
@@ -29,7 +29,6 @@ const SearchModeToggle: React.FC<SearchModeToggleProps> = ({
         >
           {mode === 'web' && 'Web'}
           {mode === 'docs' && 'Docs'}
-          {mode === 'both' && 'Both'}
         </button>
       ))}
     </div>

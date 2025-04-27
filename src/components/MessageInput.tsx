@@ -6,7 +6,6 @@ import Attach from './MessageInputActions/Attach';
 import CopilotToggle from './MessageInputActions/Copilot';
 import { File, SearchMode } from './ChatWindow';
 import AttachSmall from './MessageInputActions/AttachSmall';
-import SearchModeToggle from './MessageInputActions/SearchModeToggle';
 
 const MessageInput = ({
   sendMessage,
@@ -15,8 +14,6 @@ const MessageInput = ({
   setFileIds,
   files,
   setFiles,
-  searchMode,
-  setSearchMode,
 }: {
   sendMessage: (message: string) => void;
   loading: boolean;
@@ -24,9 +21,8 @@ const MessageInput = ({
   setFileIds: (fileIds: string[]) => void;
   files: File[];
   setFiles: (files: File[]) => void;
-  searchMode: SearchMode;
-  setSearchMode: (mode: SearchMode) => void;
 }) => {
+  console.log('--- MessageInput rendered ---');
   const [copilotEnabled, setCopilotEnabled] = useState(false);
   const [message, setMessage] = useState('');
   const [textareaRows, setTextareaRows] = useState(1);
@@ -80,18 +76,12 @@ const MessageInput = ({
         }
       }}
       className={cn(
-        'bg-light-secondary dark:bg-dark-secondary p-4 flex items-center overflow-hidden border border-light-200 dark:border-dark-200',
+        'bg-light-secondary dark:bg-dark-secondary p-4 flex items-center border border-light-200 dark:border-dark-200',
         mode === 'multi' ? 'flex-col rounded-lg' : 'flex-row rounded-full',
       )}
     >
       {mode === 'single' && (
         <>
-          <div className="mr-2">
-            <SearchModeToggle
-              searchMode={searchMode}
-              setSearchMode={setSearchMode}
-            />
-          </div>
           <AttachSmall
             fileIds={fileIds}
             setFileIds={setFileIds}
@@ -127,10 +117,6 @@ const MessageInput = ({
       {mode === 'multi' && (
         <div className="flex flex-row items-center justify-between w-full pt-2">
           <div className="flex flex-row items-center space-x-2">
-            <SearchModeToggle
-              searchMode={searchMode}
-              setSearchMode={setSearchMode}
-            />
             <AttachSmall
               fileIds={fileIds}
               setFileIds={setFileIds}

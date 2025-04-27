@@ -12,7 +12,7 @@ import { getSuggestions } from '@/lib/actions';
 import { Settings, Loader2, Send, Share2, Sparkles, Menu } from 'lucide-react';
 import Link from 'next/link';
 import NextError from 'next/error';
-import { type RagflowReference } from '@/lib/types';
+import { type RagflowReference, type RagflowReferenceChunk } from '@/lib/types';
 import { type SourceMetadata } from './MessageSources';
 // import { MessageSuggestions } from './MessageSuggestions'; // Temporarily commented out
 import { v4 as uuidv4 } from 'uuid';
@@ -286,7 +286,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
 
   const [focusMode, setFocusMode] = useState('webSearch');
   const [optimizationMode, setOptimizationMode] = useState('speed');
-  const [searchMode, setSearchMode] = useState<SearchMode>('web');
+  const [searchMode, setSearchMode] = useState<SearchMode>('docs');
 
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
 
@@ -331,16 +331,28 @@ const ChatWindow = ({ id }: { id?: string }) => {
   }, [isMessagesLoaded, isConfigReady]);
 
   const sendMessage = async (message: string, messageId?: string) => {
+    console.log('--- ChatWindow sendMessage called ---', message);
     if (loading) return;
     if (!isConfigReady) {
       toast.error('Cannot send message before the configuration is ready');
       return;
     }
 
+    const currentChatId = chatId;
+
+    if (!currentChatId) {
+      console.error(
+        'Error: Chat ID is missing in component state during sendMessage.',
+      );
+      toast.error('Cannot send message: Chat session ID is missing.');
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    const chatId = searchParams.get('id') || uuidv4(); // Use existing or create new
-    if (!searchParams.get('id')) {
-      window.history.replaceState(null, '', `/?id=${chatId}`);
+
+    if (searchParams.get('id') !== currentChatId) {
+      window.history.replaceState(null, '', `/?id=${currentChatId}`);
     }
 
     const humanMessageId = uuidv4();
@@ -348,29 +360,26 @@ const ChatWindow = ({ id }: { id?: string }) => {
       role: 'user',
       content: message,
       messageId: humanMessageId,
-      chatId: chatId,
+      chatId: currentChatId,
       createdAt: new Date(),
     };
 
-    // Add user message
     setMessages((prev) => [...prev, newUserMessage]);
 
-    // Add empty assistant message placeholder immediately
     const assistantMessageId = uuidv4();
     const assistantPlaceholderMessage: Message = {
       role: 'assistant',
-      content: '', // Start with empty content (will show loader)
+      content: '',
       messageId: assistantMessageId,
-      chatId: chatId,
+      chatId: currentChatId,
       createdAt: new Date(),
       references: undefined,
     };
     setMessages((prev) => [...prev, assistantPlaceholderMessage]);
 
-    // Format history correctly for the backend API
     const formattedHistory = messages
-      .slice(0, -1) // Exclude the assistant placeholder
-      .map((msg): [string, string] => [msg.role, msg.content]); // Map to [role, content] tuples
+      .filter((msg) => msg.messageId !== assistantPlaceholderMessage.messageId)
+      .map((msg): [string, string] => [msg.role, msg.content]);
 
     try {
       const response = await fetch('/api/chat', {
@@ -381,13 +390,12 @@ const ChatWindow = ({ id }: { id?: string }) => {
         body: JSON.stringify({
           message: {
             messageId: humanMessageId,
-            chatId: chatId,
+            chatId: currentChatId,
             content: message,
           },
-          history: formattedHistory, // Use the correctly formatted history
+          history: formattedHistory,
           focusMode: searchParams.get('fm') || 'webSearch',
-          searchMode: searchMode,
-          // ... other body parameters ...
+          searchMode: 'docs',
           chatModel: {
             provider: chatModelProvider.provider,
             name: chatModelProvider.name,
@@ -407,128 +415,55 @@ const ChatWindow = ({ id }: { id?: string }) => {
         throw new Error(errorData.error || 'API request failed');
       }
 
-      // --- Response Handling ---
-      // Use the component's state `searchMode` directly for logic
-      // Remove the redundant local declaration below:
-      // const searchMode = (searchParams.get('sm') as SearchMode) || 'web';
+      const result = await response.json();
+      if (result.type === 'finalResponse') {
+        // Process references to separate web sources and doc chunks
+        const allChunks = result.data.references?.chunks || [];
+        const webSources: SourceMetadata[] = [];
+        const docChunks: RagflowReferenceChunk[] = [];
 
-      if (searchMode === 'docs') {
-        // This now correctly refers to the component state
-        // --- Non-Streaming Response Handling ---
-        const result = await response.json();
-        if (result.type === 'finalResponse') {
-          // Update the placeholder message with the final content and references
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.messageId === assistantMessageId
-                ? {
-                    ...msg,
-                    content: result.data.content,
-                    references: result.data.references,
-                  }
-                : msg,
-            ),
-          );
-        } else if (result.type === 'error') {
-          // Handle potential error in JSON response
-          throw new Error(result.data || 'Received error from API');
-        } else {
-          // Handle unexpected response format
-          throw new Error('Unexpected response format from API');
-        }
+        allChunks.forEach((chunk: any) => {
+          if (chunk.url && typeof chunk.url === 'string') {
+            // Assume it's a web source if URL is a non-empty string
+            webSources.push({
+              title: chunk.document_name || 'Untitled Source',
+              url: chunk.url,
+              // Add other fields if necessary/available, e.g., snippet: chunk.content
+            });
+          } else {
+            // Assume it's a document chunk
+            docChunks.push(chunk as RagflowReferenceChunk);
+          }
+        });
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.messageId === assistantMessageId
+              ? {
+                  ...msg,
+                  content: result.data.content,
+                  // Assign the separated arrays
+                  sources: webSources.length > 0 ? webSources : undefined,
+                  references:
+                    docChunks.length > 0
+                      ? {
+                          chunks: docChunks,
+                          doc_aggs: result.data.references?.doc_aggs,
+                          total: docChunks.length, // Or use original total if available?
+                        }
+                      : undefined,
+                }
+              : msg,
+          ),
+        );
+      } else if (result.type === 'error') {
+        throw new Error(result.data || 'Received error from API');
       } else {
-        // --- Streaming Response Handling (for non-docs modes) ---
-        if (!response.body) {
-          throw new Error('Response body is null for streaming mode');
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let partialChunk = ''; // Buffer for incomplete JSON lines
-        let accumulatedContent = ''; // Accumulator for the final answer string
-        let currentSources: SourceMetadata[] | undefined = undefined;
-
-        const messageHandler = (data: any) => {
-          if (data.type === 'message') {
-            accumulatedContent += data.data;
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.messageId === assistantMessageId
-                  ? { ...msg, content: accumulatedContent }
-                  : msg,
-              ),
-            );
-          } else if (data.type === 'sources') {
-            currentSources = data.data as SourceMetadata[];
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.messageId === assistantMessageId
-                  ? { ...msg, sources: currentSources }
-                  : msg,
-              ),
-            );
-          } else if (data.type === 'error') {
-            toast.error(data.data);
-            setMessages((prev) =>
-              prev.filter((msg) => msg.messageId !== assistantMessageId),
-            );
-          } else if (data.type === 'messageEnd') {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.messageId === assistantMessageId
-                  ? {
-                      ...msg,
-                      content: accumulatedContent,
-                      sources: currentSources as SourceMetadata[] | undefined,
-                    }
-                  : msg,
-              ),
-            );
-          }
-        };
-
-        // Stream processing loop
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            const finalJsonString = partialChunk.trim();
-            if (finalJsonString) {
-              try {
-                const json = JSON.parse(finalJsonString);
-                messageHandler(json);
-              } catch (error) {
-                console.error(
-                  '[Stream Parser] Failed to parse final JSON chunk (non-docs):',
-                  finalJsonString,
-                  error,
-                );
-              }
-            }
-            break;
-          }
-          partialChunk += decoder.decode(value, { stream: true });
-          let newlineIndex;
-          while ((newlineIndex = partialChunk.indexOf('\n')) >= 0) {
-            const jsonString = partialChunk.substring(0, newlineIndex).trim();
-            partialChunk = partialChunk.substring(newlineIndex + 1);
-            if (jsonString) {
-              try {
-                const json = JSON.parse(jsonString);
-                messageHandler(json);
-              } catch (error) {
-                console.error(
-                  '[Stream Parser] Failed to parse JSON chunk (non-docs):',
-                  jsonString,
-                  error,
-                );
-              }
-            }
-          }
-        }
+        throw new Error('Unexpected response format from API');
       }
     } catch (error) {
       console.error('sendMessage error:', error);
       toast.error(`Error: ${(error as Error).message}`);
-      // Remove placeholder on fetch error
       setMessages((prev) =>
         prev.filter(
           (msg) => msg.messageId !== assistantPlaceholderMessage.messageId,
@@ -536,10 +471,6 @@ const ChatWindow = ({ id }: { id?: string }) => {
       );
     } finally {
       setLoading(false);
-      // Input clearing should be handled by the Input component itself
-      // after successfully calling sendMessage.
-      // Reset file uploads if needed
-      // setFiles([]);
     }
   };
 
@@ -602,22 +533,16 @@ const ChatWindow = ({ id }: { id?: string }) => {
               files={files}
               setFiles={setFiles}
               searchMode={searchMode}
-              setSearchMode={setSearchMode}
             />
           </>
         ) : (
           <EmptyChat
             sendMessage={sendMessage}
-            focusMode={focusMode}
-            setFocusMode={setFocusMode}
-            optimizationMode={optimizationMode}
-            setOptimizationMode={setOptimizationMode}
             fileIds={fileIds}
             setFileIds={setFileIds}
             files={files}
             setFiles={setFiles}
             searchMode={searchMode}
-            setSearchMode={setSearchMode}
           />
         )}
       </div>

@@ -282,8 +282,9 @@ const MessageBox = ({
       },
       // Docs Popover
       'citation-placeholder': {
-        component: (props: { marker?: string }) => (
-          <CitationRenderer {...props} message={message} />
+        // Extract marker explicitly instead of spreading all props
+        component: ({ marker }: { marker?: string }) => (
+          <CitationRenderer marker={marker} message={message} />
         ),
       },
       // Web Popover (New)
@@ -495,29 +496,39 @@ const MessageBox = ({
                               '',
                             ); // Extract domain
                             return (
+                              // Make the entire 'a' tag the clickable row with hover effect
                               <a
                                 key={index}
                                 href={source.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="block p-3 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
+                                className="block p-3 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200 cursor-pointer"
+                                // Add onClick for debugging
+                                onClick={(e) => {
+                                  console.log(
+                                    `Web source clicked: URL=${source.url}, Target=${e.currentTarget.target}`,
+                                  );
+                                  // We don't call e.preventDefault() here, so the default link behavior should still happen.
+                                }}
                               >
-                                <div className="flex items-center space-x-3">
-                                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right">
+                                <div className="flex items-start space-x-3">
+                                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right pt-0.5">
                                     {index + 1}
                                   </span>
-                                  {source.url !== '#' &&
-                                    source.url !== 'File' && (
-                                      <img
-                                        src={favIconUrl}
-                                        alt=""
-                                        className="h-5 w-5 rounded flex-shrink-0"
-                                        onError={(e) =>
-                                          (e.currentTarget.style.display =
-                                            'none')
-                                        }
-                                      />
-                                    )}
+                                  <div className="flex items-center space-x-2 flex-shrink-0 pt-0.5">
+                                    {source.url !== '#' &&
+                                      source.url !== 'File' && (
+                                        <img
+                                          src={favIconUrl}
+                                          alt=""
+                                          className="h-4 w-4 rounded flex-shrink-0"
+                                          onError={(e) =>
+                                            (e.currentTarget.style.display =
+                                              'none')
+                                          }
+                                        />
+                                      )}
+                                  </div>
                                   <div className="flex-1 overflow-hidden">
                                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                                       {source.title}
@@ -532,27 +543,30 @@ const MessageBox = ({
                           })}
                         </div>
                       ) : message.references?.chunks ? (
-                        // === Document References List ===
-                        <div className="flex flex-col space-y-3">
+                        // === Document References List (Updated Styling) ===
+                        <div className="flex flex-col space-y-2">
                           {message.references.chunks.map((chunk, index) => (
+                            // Add hover effect to the outer div, but no navigation (yet)
                             <div
-                              key={chunk.id || index} // Use chunk.id if available, otherwise index
-                              className="p-3 rounded-lg bg-light-100 dark:bg-dark-100"
+                              key={chunk.id || index}
+                              className="p-2.5 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
                             >
                               <div className="flex items-start space-x-3">
-                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 pt-0.5">
-                                  ##{index}$$
+                                {/* Display numerical index */}
+                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right flex-shrink-0 pt-0.5">
+                                  {index + 1}
                                 </span>
                                 <div className="flex-1 overflow-hidden">
                                   {chunk.document_name && (
                                     <p
-                                      className="text-sm font-medium text-gray-900 dark:text-white truncate mb-1"
+                                      className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate" // Keep link-like style for now, but remove hover/cursor if not clickable
                                       title={chunk.document_name}
                                     >
                                       {chunk.document_name}
                                     </p>
                                   )}
-                                  <p className="text-xs text-gray-700 dark:text-gray-300 max-h-20 overflow-y-auto">
+                                  {/* Restore the content snippet display */}
+                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
                                     {chunk.content}
                                   </p>
                                 </div>
