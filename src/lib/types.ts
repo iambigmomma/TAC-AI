@@ -9,6 +9,7 @@ export interface RagflowReferenceChunk {
   vector_similarity?: number;
   term_similarity?: number;
   positions?: string[];
+  url?: string | null;
 }
 
 export interface RagflowDocAgg {

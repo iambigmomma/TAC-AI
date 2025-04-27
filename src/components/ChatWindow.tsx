@@ -212,9 +212,48 @@ const loadMessages = async (
   const data = await res.json();
 
   const messages = data.messages.map((msg: any) => {
+    // Parse the stored metadata
+    const parsedMetadata = JSON.parse(msg.metadata || '{}');
+
+    // Initialize sources and references for the final message object
+    let finalSources: SourceMetadata[] | undefined = undefined;
+    let finalReferences: RagflowReference | undefined =
+      parsedMetadata.references;
+
+    // Perform separation logic if references.chunks exists in the parsed metadata
+    if (parsedMetadata.references?.chunks) {
+      const allChunks = parsedMetadata.references.chunks || [];
+      const webSources: SourceMetadata[] = [];
+
+      allChunks.forEach((chunk: any) => {
+        if (chunk.url && typeof chunk.url === 'string') {
+          webSources.push({
+            title: chunk.document_name || 'Untitled Source',
+            url: chunk.url,
+          });
+        }
+      });
+
+      if (webSources.length > 0) {
+        finalSources = webSources;
+      }
+      // Keep finalReferences as the original parsedMetadata.references
+      // to preserve indices for doc citations (##N$$)
+    }
+
+    // Construct the final message object for the state
     return {
-      ...msg,
-      ...JSON.parse(msg.metadata),
+      // Base properties from the DB row (ensure role, content etc. are included)
+      messageId: msg.messageId,
+      chatId: msg.chatId,
+      createdAt: new Date(msg.createdAt), // Ensure date is parsed correctly
+      content: msg.content,
+      role: msg.role,
+      // Add suggestions if they exist in parsedMetadata
+      suggestions: parsedMetadata.suggestions,
+      // Assign the processed sources and references
+      sources: finalSources,
+      references: finalReferences,
     };
   }) as Message[];
 
@@ -416,11 +455,18 @@ const ChatWindow = ({ id }: { id?: string }) => {
       }
 
       const result = await response.json();
+
+      // Log the raw result.data from the backend API response
+      console.log(
+        '[sendMessage] Raw API response data:',
+        JSON.stringify(result.data, null, 2), // Use JSON.stringify for better readability
+      );
+
       if (result.type === 'finalResponse') {
-        // Process references to separate web sources and doc chunks
+        // Process references: Extract web sources, keep original chunks for references
         const allChunks = result.data.references?.chunks || [];
         const webSources: SourceMetadata[] = [];
-        const docChunks: RagflowReferenceChunk[] = [];
+        // const docChunks: RagflowReferenceChunk[] = []; // Not needed anymore
 
         allChunks.forEach((chunk: any) => {
           if (chunk.url && typeof chunk.url === 'string') {
@@ -428,12 +474,10 @@ const ChatWindow = ({ id }: { id?: string }) => {
             webSources.push({
               title: chunk.document_name || 'Untitled Source',
               url: chunk.url,
-              // Add other fields if necessary/available, e.g., snippet: chunk.content
+              // Note: We could potentially add chunk.content as a snippet here if needed
             });
-          } else {
-            // Assume it's a document chunk
-            docChunks.push(chunk as RagflowReferenceChunk);
           }
+          // No need to explicitly collect docChunks here anymore
         });
 
         setMessages((prev) =>
@@ -442,16 +486,11 @@ const ChatWindow = ({ id }: { id?: string }) => {
               ? {
                   ...msg,
                   content: result.data.content,
-                  // Assign the separated arrays
+                  // Assign extracted web sources
                   sources: webSources.length > 0 ? webSources : undefined,
-                  references:
-                    docChunks.length > 0
-                      ? {
-                          chunks: docChunks,
-                          doc_aggs: result.data.references?.doc_aggs,
-                          total: docChunks.length, // Or use original total if available?
-                        }
-                      : undefined,
+                  // Assign the original, unfiltered references object from the API
+                  // This preserves original indices and includes both web/doc chunks
+                  references: result.data.references,
                 }
               : msg,
           ),

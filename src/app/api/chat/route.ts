@@ -260,6 +260,12 @@ export const POST = async (req: Request) => {
         })
         .execute();
 
+      // Log the references object before sending the response
+      console.log(
+        `[API /chat - docs mode] Sending response for chatId ${chatId}, messageId ${aiMessageId}. References object:`,
+        JSON.stringify(result.references, null, 2),
+      );
+
       return Response.json({
         type: 'finalResponse',
         data: {

@@ -55,13 +55,84 @@ const CitationRenderer = ({
   if (!marker) return null; // Handle case where marker might be missing
 
   const citationIndex = parseInt(marker.replace(/##|\$\$/g, ''), 10);
-  // Use optional chaining here for safety
+  // Use optional chaining and check if it's actually a doc chunk
   const referenceChunk = message.references?.chunks?.[citationIndex];
 
+  // Handle case: Marker is ##N$$, but the chunk HAS a URL (Inconsistent Backend Data)
+  // Render a WEB-STYLE popover in this case, using the chunk's URL and doc_name.
+  if (referenceChunk?.url) {
+    console.warn(
+      `[CitationRenderer] Backend inconsistency: Rendering WEB popover for doc marker (${marker}) because chunk has URL: ${referenceChunk.url}`,
+    );
+    const url = referenceChunk.url;
+    const title = referenceChunk.document_name || 'Web Source'; // Use doc_name as title
+    const favIconUrl = `https://s2.googleusercontent.com/s2/favicons?domain_url=${url}`;
+
+    return (
+      <Popover as="span" className="relative inline-block align-baseline">
+        {/* Use web-style button (e.g., green) */}
+        <PopoverButton className="inline-flex items-center justify-center align-middle bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded-full w-4 h-4 text-[10px] font-semibold mx-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-opacity-75 hover:bg-green-200 dark:hover:bg-green-800 -translate-y-0.5">
+          {citationIndex + 1} {/* Use index from ##N$$ */}
+        </PopoverButton>
+        <Transition
+          as={Fragment}
+          enter="transition ease-out duration-200"
+          enterFrom="opacity-0 translate-y-1"
+          enterTo="opacity-100 translate-y-0"
+          leave="transition ease-in duration-150"
+          leaveFrom="opacity-100 translate-y-0"
+          leaveTo="opacity-0 translate-y-1"
+        >
+          <PopoverPanel
+            as="span"
+            className="absolute block z-10 w-screen min-w-[300px] max-w-xs px-4 mt-1 left-0 sm:px-0"
+          >
+            {/* Use structure similar to WebCitationRenderer panel */}
+            <span className="block overflow-hidden rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white dark:bg-gray-800 p-3">
+              {title && (
+                <span
+                  className="flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate"
+                  title={title}
+                >
+                  {url !== '#' && url !== 'File' && (
+                    <img
+                      src={favIconUrl}
+                      alt=""
+                      className="inline h-4 w-4 mr-1.5 align-middle rounded-sm flex-shrink-0"
+                      onError={(e) => (e.currentTarget.style.display = 'none')}
+                    />
+                  )}
+                  <span className="truncate">{title}</span>
+                </span>
+              )}
+              {url && url !== '#' && url !== 'File' && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
+                  title={url}
+                >
+                  {url}
+                </a>
+              )}
+            </span>
+          </PopoverPanel>
+        </Transition>
+      </Popover>
+    );
+  }
+
+  // Handle case: Chunk not found for the marker ##N$$
   if (!referenceChunk) {
     // Render a non-interactive error indicator if chunk not found
+    console.warn(
+      `[CitationRenderer] Doc chunk not found for index ${citationIndex} from marker ${marker}.`,
+    );
     return (
-      <span className="text-red-500 font-semibold">[?{citationIndex + 1}]</span>
+      <span className="text-red-500 font-semibold align-baseline">
+        [?{citationIndex + 1}]?
+      </span>
     );
   }
 
@@ -106,10 +177,10 @@ const CitationRenderer = ({
               {referenceChunk.content}
             </span>
             {hasSimilarity(referenceChunk) && (
-              /* Keep p here as it's inside the styled span, not directly in Markdown's p */
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+              /* Change <p> to <span> to avoid potential nesting issues */
+              <span className="block text-xs text-gray-400 dark:text-gray-500 mt-2">
                 Similarity: {(referenceChunk.similarity * 100).toFixed(1)}%
-              </p>
+              </span>
             )}
           </span>
         </PopoverPanel>
@@ -282,16 +353,14 @@ const MessageBox = ({
       },
       // Docs Popover
       'citation-placeholder': {
-        // Extract marker explicitly instead of spreading all props
         component: ({ marker }: { marker?: string }) => (
           <CitationRenderer marker={marker} message={message} />
         ),
       },
       // Web Popover (New)
       'web-citation-placeholder': {
-        // Pass message prop explicitly to WebCitationRenderer
-        component: (props: { number?: string }) => (
-          <WebCitationRenderer {...props} message={message} />
+        component: ({ number }: { number?: string }) => (
+          <WebCitationRenderer number={number} message={message} />
         ),
       },
     },
@@ -301,37 +370,48 @@ const MessageBox = ({
   const contentWithPlaceholders = useMemo(() => {
     let processed = message.content || '';
 
-    if (message.references) {
-      // DOCS mode: Replace ##N$$ with <citation-placeholder...>
-      processed = processed.replace(/(##\d+\$\$)/g, (match) => {
-        const citationIndex = parseInt(match.replace(/##|\$\$/g, ''), 10);
-        if (message.references?.chunks?.[citationIndex]) {
-          return `<citation-placeholder marker="${match}"></citation-placeholder>`;
+    // Process DOC citations (##N$$) if references exist
+    if (message.references?.chunks && message.references.chunks.length > 0) {
+      const chunks = message.references.chunks;
+      const numChunks = chunks.length;
+      processed = processed.replace(
+        /(##(\d+)\$\$)/g,
+        (match, _fullMatch, indexStr) => {
+          const citationIndex = parseInt(indexStr, 10);
+          // Check if the index is valid for the chunks array
+          if (citationIndex >= 0 && citationIndex < numChunks) {
+            // ALWAYS generate the placeholder tag if the index is valid
+            // The CitationRenderer component will handle rendering based on chunk.url
+            return `<citation-placeholder marker="${match}"></citation-placeholder>`;
+          } else {
+            // If index is out of bounds, keep original text and warn
+            console.warn(
+              `[contentWithPlaceholders Docs] Invalid citation index ${citationIndex} for marker ${match}. Max index is ${numChunks - 1}. Keeping plain text.`,
+            );
+            return match;
+          }
+        },
+      );
+    }
+
+    // Process WEB citations ([N]) if sources exist
+    // Apply this replacement *after* the doc citations
+    if (message.sources && message.sources.length > 0) {
+      processed = processed.replace(/\[(\d+)\]/g, (match, numberStr) => {
+        const citationIndex = parseInt(numberStr, 10) - 1; // 0-based index for sources array
+        // Ensure message.sources exists AND the source at this index exists
+        if (message.sources && message.sources[citationIndex]) {
+          // Use the number as the prop for the renderer
+          return `<web-citation-placeholder number="${numberStr}"></web-citation-placeholder>`;
         } else {
+          // If source doesn't exist, keep the original text
           console.warn(
-            `[contentWithPlaceholders Docs] Chunk not found for marker ${match}, keeping plain text.`,
-          );
-          return match;
-        }
-      });
-      // Q: Should we also handle [N] here if backend sends both formats?
-      // For now, assuming only ##N$$ for docs.
-    } else if (message.sources) {
-      // WEB mode: Replace [N] with <web-citation-placeholder...>
-      processed = processed.replace(/\[(\d+)\]/g, (match, number) => {
-        const citationIndex = parseInt(number, 10) - 1;
-        if (message.sources?.[citationIndex]) {
-          // Check only for source existence, renderer checks details
-          return `<web-citation-placeholder number="${number}"></web-citation-placeholder>`;
-        } else {
-          console.warn(
-            `[contentWithPlaceholders Web] Source not found for number ${number}, keeping plain text.`,
+            `[contentWithPlaceholders Web] Source not found for number ${numberStr} in [N] marker. Keeping plain text.`,
           );
           return match;
         }
       });
     }
-    // Note: This simple replace doesn't handle complex cases like [1, 2] or [[1]]
 
     // Handle <think> tags (ensure they remain)
     if (processed.includes('<think>')) {
@@ -357,7 +437,7 @@ const MessageBox = ({
       .trim();
     // --- End cleanup step ---
     return processed;
-  }, [message.content, message.references, message.sources]); // Added message.sources
+  }, [message.content, message.references, message.sources]);
 
   // --- Typewriter Logic ---
   // Only apply typewriter effect to the last assistant message when not loading
@@ -466,127 +546,139 @@ const MessageBox = ({
                       'rounded-xl focus:outline-none', // Basic panel styling
                     )}
                   >
-                    {/* === Move Answer Section Here === */}
                     <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
                       <Markdown options={markdownOverrides}>
+                        {/* Restore typewriter logic */}
                         {isTyping ? typedContent : contentWithPlaceholders}
                       </Markdown>
                     </div>
-                    {/* Actions (Copy, Rewrite, etc.) and Related Suggestions go AFTER the Tab.Panels */}
                   </Tab.Panel>
 
-                  {/* Sources Panel (Content to be added in next step) */}
+                  {/* Sources Panel - Render combined sources inside here */}
                   {(message.sources && message.sources.length > 0) ||
                   (message.references?.chunks &&
                     message.references.chunks.length > 0) ? (
                     <Tab.Panel
                       className={cn(
                         'rounded-xl focus:outline-none p-3', // Basic panel styling, add padding
-                        'bg-light-secondary dark:bg-dark-secondary', // Add background like popovers?
+                        'bg-light-secondary dark:bg-dark-secondary', // Add background
                       )}
                     >
-                      {/* === Render Sources List === */}
-                      {message.sources ? (
-                        // === Web Sources List ===
-                        <div className="flex flex-col space-y-3">
-                          {message.sources.map((source, index) => {
-                            const favIconUrl = `https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`;
-                            const domainName = source.url.replace(
-                              /.+\/\/|www.|\..+/g,
-                              '',
-                            ); // Extract domain
-                            return (
-                              // Make the entire 'a' tag the clickable row with hover effect
-                              <a
-                                key={index}
-                                href={source.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block p-3 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200 cursor-pointer"
-                                // Add onClick for debugging
-                                onClick={(e) => {
-                                  console.log(
-                                    `Web source clicked: URL=${source.url}, Target=${e.currentTarget.target}`,
-                                  );
-                                  // We don't call e.preventDefault() here, so the default link behavior should still happen.
-                                }}
-                              >
-                                <div className="flex items-start space-x-3">
-                                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right pt-0.5">
-                                    {index + 1}
-                                  </span>
-                                  <div className="flex items-center space-x-2 flex-shrink-0 pt-0.5">
-                                    {source.url !== '#' &&
-                                      source.url !== 'File' && (
-                                        <img
-                                          src={favIconUrl}
-                                          alt=""
-                                          className="h-4 w-4 rounded flex-shrink-0"
-                                          onError={(e) =>
-                                            (e.currentTarget.style.display =
-                                              'none')
-                                          }
-                                        />
-                                      )}
+                      {/* === Insert Combined Sources Rendering Logic Here === */}
+                      <h4 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">
+                        Sources
+                      </h4>
+
+                      {/* === Web Sources Section === */}
+                      {message.sources && message.sources.length > 0 && (
+                        <div className="mb-4">
+                          <h5 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
+                            Web Results
+                          </h5>
+                          <div className="flex flex-col space-y-3">
+                            {message.sources.map((source, index) => {
+                              const favIconUrl = `https://s2.googleusercontent.com/s2/favicons?domain_url=${source.url}`;
+                              return (
+                                <a
+                                  key={`web-${index}`}
+                                  href={source.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block p-3 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200 cursor-pointer"
+                                  onClick={(e) => {
+                                    console.log(
+                                      `Web source clicked: URL=${source.url}, Target=${e.currentTarget.target}`,
+                                    );
+                                  }}
+                                >
+                                  <div className="flex items-start space-x-3">
+                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right pt-0.5">
+                                      {index + 1}
+                                    </span>
+                                    <div className="flex items-center space-x-2 flex-shrink-0 pt-0.5">
+                                      {source.url !== '#' &&
+                                        source.url !== 'File' && (
+                                          <img
+                                            src={favIconUrl}
+                                            alt=""
+                                            className="h-4 w-4 rounded flex-shrink-0"
+                                            onError={(e) =>
+                                              (e.currentTarget.style.display =
+                                                'none')
+                                            }
+                                          />
+                                        )}
+                                    </div>
+                                    <div className="flex-1 overflow-hidden">
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                        {source.title}
+                                      </p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                        {source.url}
+                                      </p>
+                                    </div>
                                   </div>
-                                  <div className="flex-1 overflow-hidden">
-                                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                      {source.title}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                      {source.url}
-                                    </p>
-                                  </div>
-                                </div>
-                              </a>
-                            );
-                          })}
+                                </a>
+                              );
+                            })}
+                          </div>
                         </div>
-                      ) : message.references?.chunks ? (
-                        // === Document References List (Updated Styling) ===
-                        <div className="flex flex-col space-y-2">
-                          {message.references.chunks.map((chunk, index) => (
-                            // Add hover effect to the outer div, but no navigation (yet)
-                            <div
-                              key={chunk.id || index}
-                              className="p-2.5 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
-                            >
-                              <div className="flex items-start space-x-3">
-                                {/* Display numerical index */}
-                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right flex-shrink-0 pt-0.5">
-                                  {index + 1}
-                                </span>
-                                <div className="flex-1 overflow-hidden">
-                                  {chunk.document_name && (
-                                    <p
-                                      className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate" // Keep link-like style for now, but remove hover/cursor if not clickable
-                                      title={chunk.document_name}
-                                    >
-                                      {chunk.document_name}
-                                    </p>
-                                  )}
-                                  {/* Restore the content snippet display */}
-                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                                    {chunk.content}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      {/* === End Sources List === */}
+                      )}
+
+                      {/* === Document References Section === */}
+                      {message.references?.chunks &&
+                        message.references.chunks.filter((chunk) => !chunk.url)
+                          .length > 0 && (
+                          <div>
+                            <h5 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
+                              聯合百科 Documents
+                            </h5>
+                            <div className="flex flex-col space-y-2">
+                              {message.references.chunks
+                                .filter((chunk) => !chunk.url) // Filter for document chunks here
+                                .map((chunk, index) => (
+                                  <div
+                                    key={chunk.id || `doc-${index}`}
+                                    className="p-2.5 rounded-lg bg-light-100 dark:bg-dark-100 hover:bg-light-200 dark:hover:bg-dark-200 transition duration-200"
+                                  >
+                                    <div className="flex items-start space-x-3">
+                                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-4 text-right flex-shrink-0 pt-0.5">
+                                        {/* We might need a way to get the original doc citation number (##N$$) here if needed */}
+                                        {index + 1}
+                                      </span>
+                                      <div className="flex-1 overflow-hidden">
+                                        {chunk.document_name && (
+                                          <p
+                                            className="text-sm font-medium text-blue-600 dark:text-blue-400 truncate"
+                                            title={chunk.document_name}
+                                          >
+                                            {chunk.document_name}
+                                          </p>
+                                        )}
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                                          {chunk.content}
+                                        </p>
+                                      </div>{' '}
+                                      {/* Close flex-1 div */}
+                                    </div>{' '}
+                                    {/* Close flex items-start div */}
+                                  </div> // Close inner mapped div
+                                ))}
+                            </div>{' '}
+                            {/* Close flex flex-col space-y-2 div */}
+                          </div> // Close conditional div for doc sources
+                        )}
+                      {/* === End Combined Sources Rendering Logic === */}
                     </Tab.Panel>
                   ) : (
-                    // Render a dummy panel if Sources tab isn't shown? Or handle logic better in Tab.List?
-                    // Let's stick with conditional rendering for now.
-                    <Tab.Panel></Tab.Panel> // Need at least one panel per tab
+                    // Render a dummy panel only if the Sources tab is NOT shown
+                    <Tab.Panel></Tab.Panel>
                   )}
                 </Tab.Panels>
               </Tab.Group>
               {/* === End NEW Tabbed Interface === */}
 
-              {/* Actions (Copy, Rewrite, etc.) - Moved outside/after Tab.Panels */}
+              {/* Actions (Copy, Rewrite, etc.) */}
               {loading && isLast
                 ? null
                 : (!isTyping ||
@@ -622,7 +714,7 @@ const MessageBox = ({
                       </div>
                     </div>
                   )}
-              {/* Related Suggestions - Moved outside/after Tab.Panels */}
+              {/* Related Suggestions */}
               {isLast &&
                 message.suggestions &&
                 message.suggestions.length > 0 &&
@@ -664,7 +756,8 @@ const MessageBox = ({
                     </div>
                   </div>
                 )}
-            </div>
+            </div>{' '}
+            {/* Close flex flex-col space-y-6 w-full lg:w-9/12 div */}
             <div className="lg:sticky lg:top-20 flex flex-col items-center space-y-3 w-full lg:w-3/12 z-30 h-full pb-4">
               <SearchImages
                 query={history[messageIndex - 1].content}
@@ -676,10 +769,11 @@ const MessageBox = ({
                 query={history[messageIndex - 1].content}
                 messageId={message.messageId}
               />
-            </div>
-          </div>
+            </div>{' '}
+            {/* Close lg:sticky div */}
+          </div> // Close flex flex-col lg:flex-row div
         ))}
-    </div>
+    </div> // Close main component div
   );
 };
 
