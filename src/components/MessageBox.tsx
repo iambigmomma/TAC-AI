@@ -561,8 +561,8 @@ const MessageBox = ({
                   >
                     <div className="prose prose-sm prose-stone dark:prose-invert max-w-none text-black dark:text-white">
                       <Markdown options={markdownOverrides}>
-                        {/* Restore typewriter logic */}
-                        {isTyping ? typedContent : contentWithPlaceholders}
+                        {/* TEMP: Disable typewriter again to test text rendering */}
+                        {contentWithPlaceholders}
                       </Markdown>
                     </div>
                   </Tab.Panel>
