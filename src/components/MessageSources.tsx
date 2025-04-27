@@ -15,6 +15,7 @@ export interface SourceMetadata {
   title: string;
   url: string;
   img_src?: string; // Optional image source
+  snippet?: string; // Add optional snippet field
 }
 
 const MessageSources = ({ sources }: { sources: SourceMetadata[] }) => {

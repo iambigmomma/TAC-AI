@@ -230,6 +230,7 @@ const loadMessages = async (
           webSources.push({
             title: chunk.document_name || 'Untitled Source',
             url: chunk.url,
+            snippet: chunk.content,
           });
         }
       });
@@ -474,7 +475,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
             webSources.push({
               title: chunk.document_name || 'Untitled Source',
               url: chunk.url,
-              // Note: We could potentially add chunk.content as a snippet here if needed
+              snippet: chunk.content,
             });
           }
           // No need to explicitly collect docChunks here anymore

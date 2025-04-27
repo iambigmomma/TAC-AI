@@ -116,6 +116,12 @@ const CitationRenderer = ({
                   {url}
                 </a>
               )}
+              {/* Add snippet display here as well */}
+              {referenceChunk.content && (
+                <p className="mt-2 text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
+                  {referenceChunk.content}
+                </p>
+              )}
             </span>
           </PopoverPanel>
         </Transition>
@@ -268,6 +274,12 @@ const WebCitationRenderer = ({
                   {url}
                 </a>
               )}
+            {/* Display snippet if available */}
+            {source.snippet && (
+              <p className="mt-2 text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
+                {source.snippet}
+              </p>
+            )}
           </span>
         </PopoverPanel>
       </Transition>
